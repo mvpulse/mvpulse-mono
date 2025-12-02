@@ -5,28 +5,113 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Plus, Trash2, Sparkles, ArrowRight, ArrowLeft, Check } from "lucide-react";
+import { Plus, Trash2, Sparkles, ArrowRight, ArrowLeft, Check, Loader2, Wallet } from "lucide-react";
 import { useState } from "react";
-import { useToast } from "@/hooks/use-toast";
+import { useLocation } from "wouter";
+import { useWallet } from "@aptos-labs/wallet-adapter-react";
+import { useContract } from "@/hooks/useContract";
+import { useNetwork } from "@/contexts/NetworkContext";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
+// Duration options in seconds
+const DURATION_OPTIONS = {
+  "1h": 3600,
+  "24h": 86400,
+  "3d": 259200,
+  "1w": 604800,
+};
+
 export default function CreatePoll() {
+  const [, setLocation] = useLocation();
+  const { connected } = useWallet();
+  const { createPoll, loading } = useContract();
+  const { config } = useNetwork();
+
+  // Form state
   const [step, setStep] = useState(1);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [category, setCategory] = useState("");
+  const [duration, setDuration] = useState<keyof typeof DURATION_OPTIONS>("24h");
   const [options, setOptions] = useState(["", ""]);
   const [distribution, setDistribution] = useState("equal");
-  const { toast } = useToast();
+  const [rewardAmount, setRewardAmount] = useState("");
 
   const addOption = () => setOptions([...options, ""]);
   const removeOption = (index: number) => setOptions(options.filter((_, i) => i !== index));
-  
+  const updateOption = (index: number, value: string) => {
+    const newOptions = [...options];
+    newOptions[index] = value;
+    setOptions(newOptions);
+  };
+
   const handleNext = () => setStep((prev) => Math.min(prev + 1, 3));
   const handleBack = () => setStep((prev) => Math.max(prev - 1, 1));
 
-  const handleCreate = () => {
-    toast({
-      title: "Poll Created!",
-      description: "Your poll has been deployed to the Movement network.",
-    });
+  const validateForm = (): boolean => {
+    if (!title.trim()) {
+      toast.error("Title is required");
+      setStep(1);
+      return false;
+    }
+    if (!description.trim()) {
+      toast.error("Description is required");
+      setStep(1);
+      return false;
+    }
+    const validOptions = options.filter((o) => o.trim());
+    if (validOptions.length < 2) {
+      toast.error("At least 2 options are required");
+      setStep(2);
+      return false;
+    }
+    return true;
+  };
+
+  const handleCreate = async () => {
+    if (!connected) {
+      toast.error("Please connect your wallet first");
+      return;
+    }
+
+    if (!config.contractAddress) {
+      toast.error("Contract not available on this network");
+      return;
+    }
+
+    if (!validateForm()) {
+      return;
+    }
+
+    try {
+      const validOptions = options.filter((o) => o.trim());
+      const rewardPerVote = rewardAmount ? Math.floor(parseFloat(rewardAmount) * 1e8) : 0; // Convert to octas
+
+      const result = await createPoll({
+        title: title.trim(),
+        description: description.trim(),
+        options: validOptions,
+        rewardPerVote,
+        durationSecs: DURATION_OPTIONS[duration],
+      });
+
+      toast.success("Poll Created!", {
+        description: "Your poll has been deployed to the Movement network.",
+        action: {
+          label: "View TX",
+          onClick: () => window.open(`${config.explorerUrl}/txn/${result.hash}?network=testnet`, "_blank"),
+        },
+      });
+
+      // Navigate to dashboard after success
+      setTimeout(() => setLocation("/dashboard"), 1500);
+    } catch (error) {
+      console.error("Failed to create poll:", error);
+      toast.error("Failed to create poll", {
+        description: error instanceof Error ? error.message : "Transaction failed",
+      });
+    }
   };
 
   const steps = [
@@ -47,31 +132,45 @@ export default function CreatePoll() {
         </Button>
       </div>
 
+      {/* Wallet Connection Warning */}
+      {!connected && (
+        <Card className="mb-6 border-yellow-500/50 bg-yellow-500/10">
+          <CardContent className="flex items-center gap-3 py-4">
+            <Wallet className="w-5 h-5 text-yellow-500" />
+            <p className="text-sm text-yellow-600 dark:text-yellow-400">
+              Please connect your wallet to create a poll.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Progress Stepper */}
       <div className="mb-8">
         <div className="flex items-center justify-between relative">
           <div className="absolute left-0 top-1/2 -translate-y-1/2 w-full h-1 bg-muted -z-10" />
-          <div 
+          <div
             className="absolute left-0 top-1/2 -translate-y-1/2 h-1 bg-primary -z-10 transition-all duration-500"
-            style={{ width: `${((step - 1) / 2) * 100}%` }} 
+            style={{ width: `${((step - 1) / 2) * 100}%` }}
           />
-          
+
           {steps.map((s) => (
             <div key={s.id} className="flex flex-col items-center gap-2 bg-background px-2">
-              <div 
+              <div
                 className={cn(
                   "w-8 h-8 rounded-full flex items-center justify-center border-2 transition-colors duration-300 font-bold text-sm",
-                  step >= s.id 
-                    ? "bg-primary border-primary text-primary-foreground" 
+                  step >= s.id
+                    ? "bg-primary border-primary text-primary-foreground"
                     : "bg-muted border-muted-foreground/20 text-muted-foreground"
                 )}
               >
                 {step > s.id ? <Check className="w-4 h-4" /> : s.id}
               </div>
-              <span className={cn(
-                "text-xs font-medium transition-colors duration-300",
-                step >= s.id ? "text-primary" : "text-muted-foreground"
-              )}>
+              <span
+                className={cn(
+                  "text-xs font-medium transition-colors duration-300",
+                  step >= s.id ? "text-primary" : "text-muted-foreground"
+                )}
+              >
                 {s.title}
               </span>
             </div>
@@ -88,17 +187,29 @@ export default function CreatePoll() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="title">Poll Title</Label>
-                <Input id="title" placeholder="e.g., Ecosystem Grant Proposal #12" className="bg-muted/30" />
+                <Label htmlFor="title">Poll Title *</Label>
+                <Input
+                  id="title"
+                  placeholder="e.g., Ecosystem Grant Proposal #12"
+                  className="bg-muted/30"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="description">Description</Label>
-                <Textarea id="description" placeholder="Describe what this poll is about..." className="bg-muted/30 min-h-[100px]" />
+                <Label htmlFor="description">Description *</Label>
+                <Textarea
+                  id="description"
+                  placeholder="Describe what this poll is about..."
+                  className="bg-muted/30 min-h-[100px]"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Category</Label>
-                  <Select>
+                  <Select value={category} onValueChange={setCategory}>
                     <SelectTrigger className="bg-muted/30">
                       <SelectValue placeholder="Select category" />
                     </SelectTrigger>
@@ -110,12 +221,13 @@ export default function CreatePoll() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Duration</Label>
-                  <Select>
+                  <Label>Duration *</Label>
+                  <Select value={duration} onValueChange={(v) => setDuration(v as keyof typeof DURATION_OPTIONS)}>
                     <SelectTrigger className="bg-muted/30">
                       <SelectValue placeholder="Select duration" />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="1h">1 Hour</SelectItem>
                       <SelectItem value="24h">24 Hours</SelectItem>
                       <SelectItem value="3d">3 Days</SelectItem>
                       <SelectItem value="1w">1 Week</SelectItem>
@@ -134,11 +246,21 @@ export default function CreatePoll() {
               <CardTitle>Step 2: Voting Options</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {options.map((_, index) => (
+              {options.map((option, index) => (
                 <div key={index} className="flex gap-2">
-                  <Input placeholder={`Option ${index + 1}`} className="bg-muted/30" />
+                  <Input
+                    placeholder={`Option ${index + 1}`}
+                    className="bg-muted/30"
+                    value={option}
+                    onChange={(e) => updateOption(index, e.target.value)}
+                  />
                   {options.length > 2 && (
-                    <Button variant="ghost" size="icon" onClick={() => removeOption(index)} className="text-destructive hover:bg-destructive/10">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => removeOption(index)}
+                      className="text-destructive hover:bg-destructive/10"
+                    >
                       <Trash2 className="w-4 h-4" />
                     </Button>
                   )}
@@ -161,44 +283,61 @@ export default function CreatePoll() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Token Type</Label>
-                  <Select>
+                  <Select defaultValue="move">
                     <SelectTrigger className="bg-muted/30">
                       <SelectValue placeholder="Select token" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="move">MOVE</SelectItem>
-                      <SelectItem value="usdc">USDC</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Total Fund Amount</Label>
-                  <Input type="number" placeholder="0.00" className="bg-muted/30" />
+                  <Label>Reward Per Vote (MOVE)</Label>
+                  <Input
+                    type="number"
+                    placeholder="0.00"
+                    className="bg-muted/30"
+                    value={rewardAmount}
+                    onChange={(e) => setRewardAmount(e.target.value)}
+                  />
                 </div>
               </div>
 
               <div className="space-y-3">
                 <Label>Distribution Method</Label>
-                <RadioGroup defaultValue="equal" onValueChange={setDistribution} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className={cn(
-                    "flex items-start space-x-3 space-y-0 rounded-md border p-4 shadow-sm cursor-pointer transition-all",
-                    distribution === "equal" ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
-                  )}>
+                <RadioGroup
+                  defaultValue="equal"
+                  onValueChange={setDistribution}
+                  className="grid grid-cols-1 md:grid-cols-2 gap-4"
+                >
+                  <div
+                    className={cn(
+                      "flex items-start space-x-3 space-y-0 rounded-md border p-4 shadow-sm cursor-pointer transition-all",
+                      distribution === "equal" ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
+                    )}
+                  >
                     <RadioGroupItem value="equal" id="equal" className="mt-1" />
                     <div className="space-y-1">
-                      <Label htmlFor="equal" className="font-medium cursor-pointer">Equal Split</Label>
+                      <Label htmlFor="equal" className="font-medium cursor-pointer">
+                        Equal Split
+                      </Label>
                       <p className="text-xs text-muted-foreground">
                         Total fund is divided equally among all participants when the poll closes.
                       </p>
                     </div>
                   </div>
-                  <div className={cn(
-                    "flex items-start space-x-3 space-y-0 rounded-md border p-4 shadow-sm cursor-pointer transition-all",
-                    distribution === "fixed" ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
-                  )}>
+                  <div
+                    className={cn(
+                      "flex items-start space-x-3 space-y-0 rounded-md border p-4 shadow-sm cursor-pointer transition-all",
+                      distribution === "fixed" ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
+                    )}
+                  >
                     <RadioGroupItem value="fixed" id="fixed" className="mt-1" />
                     <div className="space-y-1">
-                      <Label htmlFor="fixed" className="font-medium cursor-pointer">Fixed Amount</Label>
+                      <Label htmlFor="fixed" className="font-medium cursor-pointer">
+                        Fixed Amount
+                      </Label>
                       <p className="text-xs text-muted-foreground">
                         Each participant receives a fixed amount until the fund runs out.
                       </p>
@@ -206,36 +345,40 @@ export default function CreatePoll() {
                   </div>
                 </RadioGroup>
               </div>
-
-              <div className="space-y-2">
-                <Label>Max Target Responders</Label>
-                <Input type="number" placeholder="e.g. 1000" className="bg-muted/30" />
-                <p className="text-xs text-muted-foreground">
-                  Optional. The poll will automatically close when this number of responses is reached.
-                </p>
-              </div>
             </CardContent>
           </Card>
         )}
 
         {/* Navigation Buttons */}
         <div className="flex justify-between pt-4">
-          <Button 
-            variant="ghost" 
-            onClick={handleBack} 
-            disabled={step === 1}
+          <Button
+            variant="ghost"
+            onClick={handleBack}
+            disabled={step === 1 || loading}
             className={cn(step === 1 && "invisible")}
           >
             <ArrowLeft className="w-4 h-4 mr-2" /> Back
           </Button>
-          
+
           {step < 3 ? (
             <Button onClick={handleNext} className="bg-secondary text-secondary-foreground hover:bg-secondary/80">
               Next Step <ArrowRight className="w-4 h-4 ml-2" />
             </Button>
           ) : (
-            <Button onClick={handleCreate} className="bg-primary text-primary-foreground hover:bg-primary/90 px-8">
-              Launch Poll <Sparkles className="w-4 h-4 ml-2" />
+            <Button
+              onClick={handleCreate}
+              disabled={!connected || loading}
+              className="bg-primary text-primary-foreground hover:bg-primary/90 px-8"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Creating...
+                </>
+              ) : (
+                <>
+                  Launch Poll <Sparkles className="w-4 h-4 ml-2" />
+                </>
+              )}
             </Button>
           )}
         </div>

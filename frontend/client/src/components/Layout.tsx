@@ -1,6 +1,7 @@
 import { Link, useLocation } from "wouter";
 import { LayoutDashboard, FolderKanban, PlusCircle, Settings, Home } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
+import { NetworkSwitcher } from "./NetworkSwitcher";
 import { WalletButton } from "./WalletButton";
 import { cn } from "@/lib/utils";
 
@@ -47,7 +48,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
             ))}
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 md:gap-4">
+            <NetworkSwitcher />
             <ThemeToggle />
             <WalletButton />
           </div>
