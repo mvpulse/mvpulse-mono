@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, FolderKanban, PlusCircle, Settings, Home } from "lucide-react";
+import { LayoutDashboard, FolderKanban, PlusCircle, Settings, Home, UserCircle, Vote } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
 import { NetworkSwitcher } from "./NetworkSwitcher";
 import { WalletButton } from "./WalletButton";
@@ -10,10 +10,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   const navItems = [
     { icon: Home, label: "Home", href: "/" },
-    { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard" },
-    { icon: FolderKanban, label: "Projects", href: "/projects" },
+    { icon: UserCircle, label: "Creator", href: "/creator" },
+    { icon: Vote, label: "Participant", href: "/participant" },
     { icon: PlusCircle, label: "Create", href: "/create" },
-    { icon: Settings, label: "Admin", href: "/admin" },
+    { icon: FolderKanban, label: "Projects", href: "/projects" },
   ];
 
   return (
@@ -33,19 +33,22 @@ export function Layout({ children }: { children: React.ReactNode }) {
           </Link>
 
           <div className="hidden md:flex items-center gap-6">
-            {navItems.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  "text-sm font-medium transition-colors hover:text-primary flex items-center gap-2",
-                  location === item.href ? "text-primary" : "text-muted-foreground"
-                )}
-              >
-                <item.icon className="w-4 h-4" />
-                {item.label}
-              </Link>
-            ))}
+            {navItems.map((item) => {
+              const isActive = location === item.href || (item.href !== "/" && location.startsWith(item.href));
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={cn(
+                    "text-sm font-medium transition-colors hover:text-primary flex items-center gap-2",
+                    isActive ? "text-primary" : "text-muted-foreground"
+                  )}
+                >
+                  <item.icon className="w-4 h-4" />
+                  {item.label}
+                </Link>
+              );
+            })}
           </div>
 
           <div className="flex items-center gap-2 md:gap-4">
@@ -68,23 +71,27 @@ export function Layout({ children }: { children: React.ReactNode }) {
       {/* Mobile Bottom Nav */}
       <div className="fixed bottom-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-lg border-t border-border md:hidden pb-safe">
         <div className="flex items-center justify-around h-16 px-2">
-          {navItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                "flex flex-col items-center justify-center gap-1 w-full h-full px-2 transition-all",
-                location === item.href ? "text-primary" : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <item.icon className={cn("w-5 h-5", location === item.href && "fill-current opacity-20")} />
-              <span className="text-[10px] font-medium">{item.label}</span>
-            </Link>
-          ))}
+          {navItems.map((item) => {
+            const isActive = location === item.href || (item.href !== "/" && location.startsWith(item.href));
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
+                  "flex flex-col items-center justify-center gap-1 w-full h-full px-2 transition-all",
+                  isActive ? "text-primary" : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <item.icon className={cn("w-5 h-5", isActive && "fill-current opacity-20")} />
+                <span className="text-[10px] font-medium">{item.label}</span>
+              </Link>
+            );
+          })}
         </div>
       </div>
 
-      {/* Footer */}
+      {/* Footer - Only show on landing page */}
+      {location === "/" && (
       <footer className="border-t border-border/50 bg-background/50 backdrop-blur-sm py-12 mt-12">
         <div className="container mx-auto px-4">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
@@ -106,8 +113,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <div>
               <h4 className="font-bold mb-4">Platform</h4>
               <ul className="space-y-2 text-sm text-muted-foreground">
-                <li><Link href="/dashboard?role=creator" className="hover:text-primary transition-colors">For Creators</Link></li>
-                <li><Link href="/dashboard?role=participant" className="hover:text-primary transition-colors">For Participants</Link></li>
+                <li><Link href="/creator" className="hover:text-primary transition-colors">For Creators</Link></li>
+                <li><Link href="/participant" className="hover:text-primary transition-colors">For Participants</Link></li>
                 <li><Link href="/projects" className="hover:text-primary transition-colors">Projects</Link></li>
                 <li><a href="#" className="hover:text-primary transition-colors">Pricing</a></li>
               </ul>
@@ -140,6 +147,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </footer>
+      )}
     </div>
   );
 }
