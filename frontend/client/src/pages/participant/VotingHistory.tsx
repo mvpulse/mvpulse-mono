@@ -16,13 +16,13 @@ import {
   Clock,
   XCircle,
 } from "lucide-react";
-import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { useContract } from "@/hooks/useContract";
+import { useWalletConnection } from "@/hooks/useWalletConnection";
 import type { PollWithMeta } from "@/types/poll";
 import { POLL_STATUS, DISTRIBUTION_MODE } from "@/types/poll";
 
 export default function VotingHistory() {
-  const { connected, account } = useWallet();
+  const { isConnected, address } = useWalletConnection();
   const { getAllPolls, hasVoted, hasClaimed, contractAddress } = useContract();
 
   const [polls, setPolls] = useState<PollWithMeta[]>([]);
@@ -45,7 +45,7 @@ export default function VotingHistory() {
       setPolls(allPolls.sort((a, b) => b.id - a.id));
 
       // Check vote and claim status for each poll
-      if (account?.address) {
+      if (address) {
         const votedIds = new Set<number>();
         const claimedIds = new Set<number>();
         for (const poll of allPolls) {
@@ -66,7 +66,7 @@ export default function VotingHistory() {
     } finally {
       setIsLoading(false);
     }
-  }, [getAllPolls, hasVoted, hasClaimed, contractAddress, account?.address]);
+  }, [getAllPolls, hasVoted, hasClaimed, contractAddress, address]);
 
   useEffect(() => {
     fetchPolls();
@@ -141,7 +141,7 @@ export default function VotingHistory() {
     </div>
   );
 
-  if (!connected) {
+  if (!isConnected) {
     return (
       <ParticipantLayout title="Voting History" description="View all polls you've participated in">
         <Card className="border-yellow-500/50 bg-yellow-500/10">

@@ -20,19 +20,23 @@ export function Layout({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-background text-foreground font-sans selection:bg-primary selection:text-primary-foreground overflow-x-hidden">
       {/* Desktop Sidebar / Topbar */}
       <nav className="fixed top-0 w-full z-50 border-b border-border/40 bg-background/80 backdrop-blur-md supports-[backdrop-filter]:bg-background/60">
-        <div className="container flex h-16 items-center justify-between px-4">
-          <Link href="/" className="flex items-center gap-2 font-display font-bold text-xl tracking-tighter hover:opacity-80 transition-opacity">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M2 17L12 22L22 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M2 12L12 17L22 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </div>
-            <span className="bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/70">MovePoll</span>
-          </Link>
+        <div className="relative flex h-16 items-center justify-between px-4 md:px-8">
+          {/* Left: Logo */}
+          <div className="flex-shrink-0 z-10">
+            <Link href="/" className="flex items-center gap-2 font-display font-bold text-xl tracking-tighter hover:opacity-80 transition-opacity">
+              <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M2 17L12 22L22 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M2 12L12 17L22 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
+              <span className="bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/70">MovePoll</span>
+            </Link>
+          </div>
 
-          <div className="hidden md:flex items-center gap-6">
+          {/* Center: Navigation items - absolutely positioned to be truly centered on viewport */}
+          <div className="hidden md:flex absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 items-center gap-6">
             {navItems.map((item) => {
               const isActive = location === item.href || (item.href !== "/" && location.startsWith(item.href));
               return (
@@ -51,7 +55,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
             })}
           </div>
 
-          <div className="flex items-center gap-2 md:gap-4">
+          {/* Right: Controls */}
+          <div className="flex items-center gap-2 md:gap-4 z-10">
             <NetworkSwitcher />
             <ThemeToggle />
             <WalletButton />

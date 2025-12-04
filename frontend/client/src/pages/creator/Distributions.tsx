@@ -17,15 +17,15 @@ import {
   Users,
   HandCoins,
 } from "lucide-react";
-import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { useContract } from "@/hooks/useContract";
+import { useWalletConnection } from "@/hooks/useWalletConnection";
 import type { PollWithMeta } from "@/types/poll";
 import { POLL_STATUS, DISTRIBUTION_MODE } from "@/types/poll";
 import { toast } from "sonner";
 import { useNetwork } from "@/contexts/NetworkContext";
 
 export default function Distributions() {
-  const { connected, account } = useWallet();
+  const { isConnected, address } = useWalletConnection();
   const { getAllPolls, distributeRewards, contractAddress } = useContract();
   const { config } = useNetwork();
 
@@ -57,11 +57,11 @@ export default function Distributions() {
 
   // Filter to creator's polls
   const myPolls = useMemo(() => {
-    if (!account?.address) return [];
+    if (!address) return [];
     return polls.filter(
-      (p) => p.creator.toLowerCase() === account.address.toString().toLowerCase()
+      (p) => p.creator.toLowerCase() === address.toLowerCase()
     );
-  }, [polls, account?.address]);
+  }, [polls, address]);
 
   // Get polls needing distribution (push mode, closed, not distributed)
   const pendingDistributions = useMemo(() => {
@@ -136,7 +136,7 @@ export default function Distributions() {
     </div>
   );
 
-  if (!connected) {
+  if (!isConnected) {
     return (
       <CreatorLayout title="Distributions" description="Manage reward distributions for your polls">
         <Card className="border-yellow-500/50 bg-yellow-500/10">

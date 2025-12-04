@@ -35,8 +35,8 @@ import {
 } from "@/components/ui/dialog";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
-import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { useContract } from "@/hooks/useContract";
+import { useWalletConnection } from "@/hooks/useWalletConnection";
 import type { PollWithMeta } from "@/types/poll";
 import { POLL_STATUS, DISTRIBUTION_MODE } from "@/types/poll";
 import { toast } from "sonner";
@@ -44,7 +44,7 @@ import { useNetwork } from "@/contexts/NetworkContext";
 import { truncateAddress } from "@/lib/contract";
 
 export default function ManagePolls() {
-  const { connected, account } = useWallet();
+  const { isConnected, address } = useWalletConnection();
   const { getAllPolls, closePoll, distributeRewards, withdrawRemaining, contractAddress } = useContract();
   const { config } = useNetwork();
 
@@ -58,7 +58,7 @@ export default function ManagePolls() {
     open: false,
     pollId: null,
   });
-  const [selectedDistributionMode, setSelectedDistributionMode] = useState(DISTRIBUTION_MODE.MANUAL_PULL);
+  const [selectedDistributionMode, setSelectedDistributionMode] = useState<number>(DISTRIBUTION_MODE.MANUAL_PULL);
   const [actionLoading, setActionLoading] = useState<{ type: string; pollId: number } | null>(null);
 
   // Fetch polls
@@ -85,11 +85,11 @@ export default function ManagePolls() {
 
   // Filter to creator's polls
   const myPolls = useMemo(() => {
-    if (!account?.address) return [];
+    if (!address) return [];
     return polls.filter(
-      (p) => p.creator.toLowerCase() === account.address.toString().toLowerCase()
+      (p) => p.creator.toLowerCase() === address.toLowerCase()
     );
-  }, [polls, account?.address]);
+  }, [polls, address]);
 
   // Filter by tab and search
   const filteredPolls = useMemo(() => {
@@ -218,7 +218,7 @@ export default function ManagePolls() {
     </div>
   );
 
-  if (!connected) {
+  if (!isConnected) {
     return (
       <CreatorLayout title="Manage Polls" description="View and manage all your polls">
         <Card className="border-yellow-500/50 bg-yellow-500/10">

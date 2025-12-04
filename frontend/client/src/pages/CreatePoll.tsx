@@ -8,8 +8,8 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Plus, Trash2, Sparkles, ArrowRight, ArrowLeft, Check, Loader2, Wallet, Coins, Info, Calculator } from "lucide-react";
 import { useState, useMemo } from "react";
 import { useLocation } from "wouter";
-import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { useContract } from "@/hooks/useContract";
+import { useWalletConnection } from "@/hooks/useWalletConnection";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -25,7 +25,7 @@ const DURATION_OPTIONS = {
 
 export default function CreatePoll() {
   const [, setLocation] = useLocation();
-  const { connected } = useWallet();
+  const { isConnected } = useWalletConnection();
   const { createPoll, loading } = useContract();
   const { config } = useNetwork();
 
@@ -135,9 +135,9 @@ export default function CreatePoll() {
   };
 
   const handleCreate = async () => {
-    console.log("handleCreate called", { connected, contractAddress: config.contractAddress });
+    console.log("handleCreate called", { isConnected, contractAddress: config.contractAddress });
 
-    if (!connected) {
+    if (!isConnected) {
       toast.error("Please connect your wallet first");
       return;
     }
@@ -212,7 +212,7 @@ export default function CreatePoll() {
       </div>
 
       {/* Wallet Connection Warning */}
-      {!connected && (
+      {!isConnected && (
         <Card className="mb-6 border-yellow-500/50 bg-yellow-500/10">
           <CardContent className="flex items-center gap-3 py-4">
             <Wallet className="w-5 h-5 text-yellow-500" />
@@ -539,7 +539,7 @@ export default function CreatePoll() {
           ) : (
             <Button
               onClick={handleCreate}
-              disabled={!connected || loading}
+              disabled={!isConnected || loading}
               className="bg-primary text-primary-foreground hover:bg-primary/90 px-8"
             >
               {loading ? (

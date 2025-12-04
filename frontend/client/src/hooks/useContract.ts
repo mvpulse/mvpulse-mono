@@ -2,16 +2,28 @@ import { useState, useCallback, useMemo } from "react";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { createAptosClient, getFunctionId, formatTimeRemaining, isPollActive } from "@/lib/contract";
+import { usePrivyWallet } from "@/hooks/usePrivyWallet";
+import { submitPrivyTransaction } from "@/lib/privy-transactions";
 import type { Poll, PollWithMeta, CreatePollInput, VoteInput, TransactionResult, PlatformConfig } from "@/types/poll";
 
 export function useContract() {
   const { config } = useNetwork();
   const { signAndSubmitTransaction, account } = useWallet();
+  const {
+    isPrivyWallet,
+    walletAddress: privyAddress,
+    publicKey: privyPublicKey,
+    signRawHash,
+  } = usePrivyWallet();
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const client = useMemo(() => createAptosClient(config), [config]);
   const contractAddress = config.contractAddress;
+
+  // Get the active wallet address (Privy or native)
+  const activeAddress = isPrivyWallet ? privyAddress : account?.address?.toString();
 
   // Helper to enrich poll with computed fields
   const enrichPoll = useCallback((poll: Poll): PollWithMeta => {
@@ -28,39 +40,71 @@ export function useContract() {
     };
   }, []);
 
+  // Helper function to execute transaction with dual-path support
+  const executeTransaction = useCallback(
+    async (
+      functionName: string,
+      functionArguments: (string | number | boolean | string[])[],
+      errorMessage: string
+    ): Promise<TransactionResult> => {
+      if (isPrivyWallet) {
+        if (!privyAddress || !privyPublicKey || !signRawHash) {
+          throw new Error("Privy wallet not properly connected");
+        }
+
+        const hash = await submitPrivyTransaction(
+          client,
+          privyAddress,
+          privyPublicKey,
+          signRawHash,
+          {
+            function: getFunctionId(contractAddress, functionName),
+            typeArguments: [],
+            functionArguments,
+          }
+        );
+
+        return { hash, success: true };
+      } else {
+        if (!signAndSubmitTransaction) {
+          throw new Error("Wallet not connected");
+        }
+
+        const response = await signAndSubmitTransaction({
+          data: {
+            function: getFunctionId(contractAddress, functionName),
+            typeArguments: [],
+            functionArguments,
+          },
+        });
+
+        return { hash: response.hash, success: true };
+      }
+    },
+    [isPrivyWallet, privyAddress, privyPublicKey, signRawHash, signAndSubmitTransaction, client, contractAddress]
+  );
+
   // Create a new poll
-  // Note: distribution_mode is now set when closing the poll, not at creation
   const createPoll = useCallback(
     async (input: CreatePollInput): Promise<TransactionResult> => {
-      if (!signAndSubmitTransaction) {
-        throw new Error("Wallet not connected");
-      }
-
       setLoading(true);
       setError(null);
 
       try {
-        const response = await signAndSubmitTransaction({
-          data: {
-            function: getFunctionId(contractAddress, "create_poll"),
-            typeArguments: [],
-            functionArguments: [
-              contractAddress, // registry_addr
-              input.title,
-              input.description,
-              input.options,
-              input.rewardPerVote.toString(),
-              input.maxVoters.toString(),
-              input.durationSecs.toString(),
-              input.fundAmount.toString(),
-            ],
-          },
-        });
-
-        return {
-          hash: response.hash,
-          success: true,
-        };
+        return await executeTransaction(
+          "create_poll",
+          [
+            contractAddress, // registry_addr
+            input.title,
+            input.description,
+            input.options,
+            input.rewardPerVote.toString(),
+            input.maxVoters.toString(),
+            input.durationSecs.toString(),
+            input.fundAmount.toString(),
+          ],
+          "Failed to create poll"
+        );
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to create poll";
         setError(message);
@@ -69,36 +113,21 @@ export function useContract() {
         setLoading(false);
       }
     },
-    [signAndSubmitTransaction, contractAddress]
+    [executeTransaction, contractAddress]
   );
 
   // Fund an existing poll
   const fundPoll = useCallback(
     async (pollId: number, amount: number): Promise<TransactionResult> => {
-      if (!signAndSubmitTransaction) {
-        throw new Error("Wallet not connected");
-      }
-
       setLoading(true);
       setError(null);
 
       try {
-        const response = await signAndSubmitTransaction({
-          data: {
-            function: getFunctionId(contractAddress, "fund_poll"),
-            typeArguments: [],
-            functionArguments: [
-              contractAddress,
-              pollId.toString(),
-              amount.toString(),
-            ],
-          },
-        });
-
-        return {
-          hash: response.hash,
-          success: true,
-        };
+        return await executeTransaction(
+          "fund_poll",
+          [contractAddress, pollId.toString(), amount.toString()],
+          "Failed to fund poll"
+        );
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to fund poll";
         setError(message);
@@ -107,35 +136,21 @@ export function useContract() {
         setLoading(false);
       }
     },
-    [signAndSubmitTransaction, contractAddress]
+    [executeTransaction, contractAddress]
   );
 
   // Claim reward (for Manual Pull mode)
   const claimReward = useCallback(
     async (pollId: number): Promise<TransactionResult> => {
-      if (!signAndSubmitTransaction) {
-        throw new Error("Wallet not connected");
-      }
-
       setLoading(true);
       setError(null);
 
       try {
-        const response = await signAndSubmitTransaction({
-          data: {
-            function: getFunctionId(contractAddress, "claim_reward"),
-            typeArguments: [],
-            functionArguments: [
-              contractAddress,
-              pollId.toString(),
-            ],
-          },
-        });
-
-        return {
-          hash: response.hash,
-          success: true,
-        };
+        return await executeTransaction(
+          "claim_reward",
+          [contractAddress, pollId.toString()],
+          "Failed to claim reward"
+        );
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to claim reward";
         setError(message);
@@ -144,35 +159,21 @@ export function useContract() {
         setLoading(false);
       }
     },
-    [signAndSubmitTransaction, contractAddress]
+    [executeTransaction, contractAddress]
   );
 
   // Distribute rewards to all voters (for Manual Push mode)
   const distributeRewards = useCallback(
     async (pollId: number): Promise<TransactionResult> => {
-      if (!signAndSubmitTransaction) {
-        throw new Error("Wallet not connected");
-      }
-
       setLoading(true);
       setError(null);
 
       try {
-        const response = await signAndSubmitTransaction({
-          data: {
-            function: getFunctionId(contractAddress, "distribute_rewards"),
-            typeArguments: [],
-            functionArguments: [
-              contractAddress,
-              pollId.toString(),
-            ],
-          },
-        });
-
-        return {
-          hash: response.hash,
-          success: true,
-        };
+        return await executeTransaction(
+          "distribute_rewards",
+          [contractAddress, pollId.toString()],
+          "Failed to distribute rewards"
+        );
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to distribute rewards";
         setError(message);
@@ -181,35 +182,21 @@ export function useContract() {
         setLoading(false);
       }
     },
-    [signAndSubmitTransaction, contractAddress]
+    [executeTransaction, contractAddress]
   );
 
   // Withdraw remaining funds from a poll
   const withdrawRemaining = useCallback(
     async (pollId: number): Promise<TransactionResult> => {
-      if (!signAndSubmitTransaction) {
-        throw new Error("Wallet not connected");
-      }
-
       setLoading(true);
       setError(null);
 
       try {
-        const response = await signAndSubmitTransaction({
-          data: {
-            function: getFunctionId(contractAddress, "withdraw_remaining"),
-            typeArguments: [],
-            functionArguments: [
-              contractAddress,
-              pollId.toString(),
-            ],
-          },
-        });
-
-        return {
-          hash: response.hash,
-          success: true,
-        };
+        return await executeTransaction(
+          "withdraw_remaining",
+          [contractAddress, pollId.toString()],
+          "Failed to withdraw funds"
+        );
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to withdraw funds";
         setError(message);
@@ -218,36 +205,25 @@ export function useContract() {
         setLoading(false);
       }
     },
-    [signAndSubmitTransaction, contractAddress]
+    [executeTransaction, contractAddress]
   );
 
   // Vote on a poll
   const vote = useCallback(
     async (input: VoteInput): Promise<TransactionResult> => {
-      if (!signAndSubmitTransaction) {
-        throw new Error("Wallet not connected");
-      }
-
       setLoading(true);
       setError(null);
 
       try {
-        const response = await signAndSubmitTransaction({
-          data: {
-            function: getFunctionId(contractAddress, "vote"),
-            typeArguments: [],
-            functionArguments: [
-              contractAddress, // registry_addr
-              input.pollId.toString(),
-              input.optionIndex.toString(),
-            ],
-          },
-        });
-
-        return {
-          hash: response.hash,
-          success: true,
-        };
+        return await executeTransaction(
+          "vote",
+          [
+            contractAddress, // registry_addr
+            input.pollId.toString(),
+            input.optionIndex.toString(),
+          ],
+          "Failed to vote"
+        );
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to vote";
         setError(message);
@@ -256,37 +232,25 @@ export function useContract() {
         setLoading(false);
       }
     },
-    [signAndSubmitTransaction, contractAddress]
+    [executeTransaction, contractAddress]
   );
 
   // Close a poll and set distribution mode
-  // distributionMode: 0 = Manual Pull (participants claim), 1 = Manual Push (creator distributes)
   const closePoll = useCallback(
     async (pollId: number, distributionMode: number): Promise<TransactionResult> => {
-      if (!signAndSubmitTransaction) {
-        throw new Error("Wallet not connected");
-      }
-
       setLoading(true);
       setError(null);
 
       try {
-        const response = await signAndSubmitTransaction({
-          data: {
-            function: getFunctionId(contractAddress, "close_poll"),
-            typeArguments: [],
-            functionArguments: [
-              contractAddress, // registry_addr
-              pollId.toString(),
-              distributionMode.toString(),
-            ],
-          },
-        });
-
-        return {
-          hash: response.hash,
-          success: true,
-        };
+        return await executeTransaction(
+          "close_poll",
+          [
+            contractAddress, // registry_addr
+            pollId.toString(),
+            distributionMode.toString(),
+          ],
+          "Failed to close poll"
+        );
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to close poll";
         setError(message);
@@ -295,7 +259,7 @@ export function useContract() {
         setLoading(false);
       }
     },
-    [signAndSubmitTransaction, contractAddress]
+    [executeTransaction, contractAddress]
   );
 
   // Get a single poll by ID (view function)
@@ -351,7 +315,7 @@ export function useContract() {
   // Check if user has voted (view function)
   const hasVoted = useCallback(
     async (pollId: number, voterAddress?: string): Promise<boolean> => {
-      const address = voterAddress || account?.address;
+      const address = voterAddress || activeAddress;
       if (!contractAddress || !address) return false;
 
       try {
@@ -369,13 +333,13 @@ export function useContract() {
         return false;
       }
     },
-    [client, contractAddress, account?.address]
+    [client, contractAddress, activeAddress]
   );
 
   // Check if user has claimed reward (view function)
   const hasClaimed = useCallback(
     async (pollId: number, claimerAddress?: string): Promise<boolean> => {
-      const address = claimerAddress || account?.address;
+      const address = claimerAddress || activeAddress;
       if (!contractAddress || !address) return false;
 
       try {
@@ -393,7 +357,7 @@ export function useContract() {
         return false;
       }
     },
-    [client, contractAddress, account?.address]
+    [client, contractAddress, activeAddress]
   );
 
   // Get all polls (fetches each poll individually)
@@ -444,6 +408,9 @@ export function useContract() {
     loading,
     error,
     contractAddress,
+    // Wallet info
+    isPrivyWallet,
+    activeAddress,
 
     // Write functions
     createPoll,

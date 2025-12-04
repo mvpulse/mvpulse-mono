@@ -17,15 +17,15 @@ import {
   Gift,
   Loader2,
 } from "lucide-react";
-import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { useContract } from "@/hooks/useContract";
+import { useWalletConnection } from "@/hooks/useWalletConnection";
 import type { PollWithMeta } from "@/types/poll";
 import { POLL_STATUS, DISTRIBUTION_MODE } from "@/types/poll";
 import { toast } from "sonner";
 import { useNetwork } from "@/contexts/NetworkContext";
 
 export default function ParticipantDashboard() {
-  const { connected, account } = useWallet();
+  const { isConnected, address } = useWalletConnection();
   const { getAllPolls, hasVoted, hasClaimed, claimReward, contractAddress } = useContract();
   const { config } = useNetwork();
 
@@ -48,7 +48,7 @@ export default function ParticipantDashboard() {
       setPolls(allPolls.sort((a, b) => b.id - a.id));
 
       // Check vote and claim status for each poll
-      if (account?.address) {
+      if (address) {
         const votedIds = new Set<number>();
         const claimedIds = new Set<number>();
         for (const poll of allPolls) {
@@ -69,7 +69,7 @@ export default function ParticipantDashboard() {
     } finally {
       setIsLoading(false);
     }
-  }, [getAllPolls, hasVoted, hasClaimed, contractAddress, account?.address]);
+  }, [getAllPolls, hasVoted, hasClaimed, contractAddress, address]);
 
   useEffect(() => {
     fetchPolls();
@@ -171,7 +171,7 @@ export default function ParticipantDashboard() {
     <Skeleton className="h-48 w-full rounded-xl" />
   );
 
-  if (!connected) {
+  if (!isConnected) {
     return (
       <ParticipantLayout title="Participant Dashboard" description="Track your votes and rewards">
         <Card className="border-yellow-500/50 bg-yellow-500/10">
