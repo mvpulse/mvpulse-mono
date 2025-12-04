@@ -21,6 +21,7 @@ import { useContract } from "@/hooks/useContract";
 import { useWalletConnection } from "@/hooks/useWalletConnection";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { truncateAddress } from "@/lib/contract";
+import { getCoinSymbol, CoinTypeId, COIN_TYPES } from "@/lib/tokens";
 import type { PollWithMeta } from "@/types/poll";
 import { POLL_STATUS, DISTRIBUTION_MODE } from "@/types/poll";
 
@@ -140,11 +141,11 @@ export default function PollDetails() {
 
   // Handle claiming reward (for Manual Pull mode)
   const handleClaim = async () => {
-    if (pollId === null || !isConnected) return;
+    if (pollId === null || !isConnected || !poll) return;
 
     setIsClaiming(true);
     try {
-      const result = await claimReward(pollId);
+      const result = await claimReward(pollId, poll.coin_type_id as CoinTypeId);
       toast.success("Reward Claimed!", {
         description: "Your reward has been transferred to your wallet.",
         action: {
@@ -166,11 +167,11 @@ export default function PollDetails() {
 
   // Handle distributing rewards (for Manual Push mode - creator only)
   const handleDistribute = async () => {
-    if (pollId === null || !isConnected) return;
+    if (pollId === null || !isConnected || !poll) return;
 
     setIsDistributing(true);
     try {
-      const result = await distributeRewards(pollId);
+      const result = await distributeRewards(pollId, poll.coin_type_id as CoinTypeId);
       toast.success("Rewards Distributed!", {
         description: "All voters have received their rewards.",
         action: {
@@ -317,7 +318,7 @@ export default function PollDetails() {
               {poll.reward_pool > 0 && (
                 <Badge variant="outline" className="bg-accent/10 text-accent border-accent/30">
                   <Coins className="w-3 h-3 mr-1" />
-                  {rewardPoolMove.toFixed(2)} MOVE
+                  {rewardPoolMove.toFixed(2)} {getCoinSymbol(poll.coin_type_id as CoinTypeId)}
                 </Badge>
               )}
             </div>
@@ -437,14 +438,14 @@ export default function PollDetails() {
               <div className="flex justify-between items-center">
                 <span className="text-muted-foreground">Reward Pool</span>
                 <span className="font-bold font-mono">
-                  {rewardPoolMove > 0 ? `${rewardPoolMove.toFixed(4)} MOVE` : "No funds"}
+                  {rewardPoolMove > 0 ? `${rewardPoolMove.toFixed(4)} ${getCoinSymbol(poll.coin_type_id as CoinTypeId)}` : "No funds"}
                 </span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-muted-foreground">Per Voter</span>
                 <span className="font-bold font-mono">
                   {estimatedRewardPerVoter > 0
-                    ? `~${estimatedRewardPerVoter.toFixed(4)} MOVE`
+                    ? `~${estimatedRewardPerVoter.toFixed(4)} ${getCoinSymbol(poll.coin_type_id as CoinTypeId)}`
                     : "N/A"}
                 </span>
               </div>
@@ -580,6 +581,10 @@ export default function PollDetails() {
                   <span className="text-muted-foreground">Claims</span>
                   <span className="font-mono">{poll.claimed.length}/{poll.totalVotes}</span>
                 </li>
+                <li className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Token</span>
+                  <Badge variant="outline">{getCoinSymbol(poll.coin_type_id as CoinTypeId)}</Badge>
+                </li>
               </ul>
             </CardContent>
           </Card>
@@ -650,7 +655,7 @@ export default function PollDetails() {
               <div className="bg-muted/50 rounded-lg p-3 text-sm">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Total Reward Pool</span>
-                  <span className="font-mono font-semibold">{rewardPoolMove.toFixed(4)} MOVE</span>
+                  <span className="font-mono font-semibold">{rewardPoolMove.toFixed(4)} {getCoinSymbol(poll.coin_type_id as CoinTypeId)}</span>
                 </div>
                 <div className="flex justify-between mt-1">
                   <span className="text-muted-foreground">Voters</span>
@@ -659,7 +664,7 @@ export default function PollDetails() {
                 {poll.totalVotes > 0 && (
                   <div className="flex justify-between mt-1">
                     <span className="text-muted-foreground">Per Voter</span>
-                    <span className="font-mono text-green-600">~{estimatedRewardPerVoter.toFixed(4)} MOVE</span>
+                    <span className="font-mono text-green-600">~{estimatedRewardPerVoter.toFixed(4)} {getCoinSymbol(poll.coin_type_id as CoinTypeId)}</span>
                   </div>
                 )}
               </div>
