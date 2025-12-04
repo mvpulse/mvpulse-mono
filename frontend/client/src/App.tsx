@@ -13,6 +13,7 @@ import NotFound from "@/pages/not-found";
 // Creator pages
 import CreatorDashboard from "@/pages/creator/CreatorDashboard";
 import ManagePolls from "@/pages/creator/ManagePolls";
+import ManagePoll from "@/pages/creator/ManagePoll";
 import Distributions from "@/pages/creator/Distributions";
 
 // Participant pages
@@ -34,6 +35,7 @@ function App() {
 
         {/* Creator routes */}
         <Route path="/creator" component={CreatorDashboard} />
+        <Route path="/creator/manage/:pollId" component={ManagePoll} />
         <Route path="/creator/manage" component={ManagePolls} />
         <Route path="/creator/distributions" component={Distributions} />
 

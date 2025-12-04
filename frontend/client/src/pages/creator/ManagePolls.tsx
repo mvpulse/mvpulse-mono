@@ -301,17 +301,16 @@ export default function ManagePolls() {
                   const isActionLoading = actionLoading?.pollId === poll.id;
 
                   return (
-                    <div
+                    <Link
                       key={poll.id}
-                      className="flex items-center gap-4 p-4 hover:bg-muted/30 transition-colors"
+                      href={`/creator/manage/${poll.id}`}
+                      className="flex items-center gap-4 p-4 hover:bg-muted/30 transition-colors cursor-pointer"
                     >
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
-                          <Link href={`/poll/${poll.id}`}>
-                            <span className="font-medium hover:text-primary transition-colors truncate">
-                              {poll.title}
-                            </span>
-                          </Link>
+                          <span className="font-medium hover:text-primary transition-colors truncate">
+                            {poll.title}
+                          </span>
                           {getStatusBadge(poll)}
                         </div>
                         <p className="text-sm text-muted-foreground">
@@ -319,16 +318,26 @@ export default function ManagePolls() {
                         </p>
                       </div>
 
-                      <div className="flex items-center gap-2">
-                        <Link href={`/poll/${poll.id}`}>
-                          <Button variant="ghost" size="sm">
-                            <ExternalLink className="w-4 h-4" />
-                          </Button>
-                        </Link>
+                      <div className="flex items-center gap-2" onClick={(e) => e.preventDefault()}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            window.open(`/poll/${poll.id}`, "_blank");
+                          }}
+                        >
+                          <ExternalLink className="w-4 h-4" />
+                        </Button>
 
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="sm" disabled={isActionLoading}>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={isActionLoading}
+                              onClick={(e) => e.preventDefault()}
+                            >
                               {isActionLoading ? (
                                 <Loader2 className="w-4 h-4 animate-spin" />
                               ) : (
@@ -360,7 +369,7 @@ export default function ManagePolls() {
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
-                    </div>
+                    </Link>
                   );
                 })}
               </div>
