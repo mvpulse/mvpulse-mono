@@ -17,8 +17,8 @@ import {
 import { Trophy, Clock, Share2, AlertCircle, Loader2, Wallet, CheckCircle2, Gift, Send, Coins, XCircle, Users, HandCoins } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
-import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { useContract } from "@/hooks/useContract";
+import { useWalletConnection } from "@/hooks/useWalletConnection";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { truncateAddress } from "@/lib/contract";
 import type { PollWithMeta } from "@/types/poll";
@@ -26,7 +26,7 @@ import { POLL_STATUS, DISTRIBUTION_MODE } from "@/types/poll";
 
 export default function PollDetails() {
   const { id } = useParams();
-  const { connected, account } = useWallet();
+  const { isConnected, address } = useWalletConnection();
   const {
     getPoll,
     vote,
@@ -67,7 +67,7 @@ export default function PollDetails() {
       setPoll(pollData);
 
       // Check if user has voted and claimed
-      if (account?.address) {
+      if (address) {
         const voted = await checkHasVoted(pollId);
         setUserHasVoted(voted);
 
@@ -75,9 +75,9 @@ export default function PollDetails() {
         setUserHasClaimed(claimed);
 
         // Find which option user voted for
-        if (voted && pollData?.voters) {
+        if (voted && pollData?.voters && address) {
           const voterIndex = pollData.voters.findIndex(
-            (v) => v.toLowerCase() === account.address.toString().toLowerCase()
+            (v) => v.toLowerCase() === address.toLowerCase()
           );
           if (voterIndex !== -1) {
             // The voter index corresponds to their vote (simplified - in reality we'd track this differently)
@@ -91,7 +91,7 @@ export default function PollDetails() {
     } finally {
       setIsLoading(false);
     }
-  }, [pollId, getPoll, checkHasVoted, checkHasClaimed, account?.address]);
+  }, [pollId, getPoll, checkHasVoted, checkHasClaimed, address]);
 
   useEffect(() => {
     fetchPollData();
@@ -101,7 +101,7 @@ export default function PollDetails() {
   const handleVote = async () => {
     if (selectedOption === null || pollId === null) return;
 
-    if (!connected) {
+    if (!isConnected) {
       toast.error("Please connect your wallet to vote");
       return;
     }
@@ -140,7 +140,7 @@ export default function PollDetails() {
 
   // Handle claiming reward (for Manual Pull mode)
   const handleClaim = async () => {
-    if (pollId === null || !connected) return;
+    if (pollId === null || !isConnected) return;
 
     setIsClaiming(true);
     try {
@@ -166,7 +166,7 @@ export default function PollDetails() {
 
   // Handle distributing rewards (for Manual Push mode - creator only)
   const handleDistribute = async () => {
-    if (pollId === null || !connected) return;
+    if (pollId === null || !isConnected) return;
 
     setIsDistributing(true);
     try {
@@ -191,7 +191,7 @@ export default function PollDetails() {
 
   // Handle closing poll (creator only)
   const handleClosePoll = async () => {
-    if (pollId === null || !connected) return;
+    if (pollId === null || !isConnected) return;
 
     setIsClosing(true);
     try {
@@ -218,8 +218,8 @@ export default function PollDetails() {
   };
 
   // Check if current user is the poll creator
-  const isCreator = poll && account?.address
-    ? poll.creator.toLowerCase() === account.address.toString().toLowerCase()
+  const isCreator = poll && address
+    ? poll.creator.toLowerCase() === address.toLowerCase()
     : false;
 
   // Loading state
@@ -331,7 +331,7 @@ export default function PollDetails() {
           </div>
 
           {/* Wallet Connection Warning */}
-          {!connected && (
+          {!isConnected && (
             <Card className="border-yellow-500/50 bg-yellow-500/10">
               <CardContent className="flex items-center gap-3 py-4">
                 <Wallet className="w-5 h-5 text-yellow-500" />
@@ -404,7 +404,7 @@ export default function PollDetails() {
               {!userHasVoted && poll.isActive ? (
                 <Button
                   className="w-full bg-primary text-primary-foreground hover:bg-primary/90 font-bold text-lg h-12"
-                  disabled={selectedOption === null || !connected || isVoting || contractLoading}
+                  disabled={selectedOption === null || !isConnected || isVoting || contractLoading}
                   onClick={handleVote}
                 >
                   {isVoting ? (
@@ -468,7 +468,7 @@ export default function PollDetails() {
           </Card>
 
           {/* Actions Card - Claim/Distribute/Close */}
-          {connected && (rewardPoolMove > 0 || isCreator) && (
+          {isConnected && (rewardPoolMove > 0 || isCreator) && (
             <Card className="border-primary/20">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">

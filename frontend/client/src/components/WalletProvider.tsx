@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
 import { AptosWalletAdapterProvider } from "@aptos-labs/wallet-adapter-react";
 import { Network } from "@aptos-labs/ts-sdk";
+import { PrivyProvider } from "@privy-io/react-auth";
 import { NetworkProvider, useNetwork } from "@/contexts/NetworkContext";
 
 interface WalletProviderProps {
@@ -29,11 +30,27 @@ function WalletAdapterWrapper({ children }: { children: ReactNode }) {
   );
 }
 
-// Main provider that wraps NetworkProvider around everything
+// Main provider that wraps NetworkProvider, PrivyProvider, and WalletAdapter
 export function WalletProvider({ children }: WalletProviderProps) {
+  const privyAppId = import.meta.env.VITE_PRIVY_APP_ID;
+
+  if (!privyAppId) {
+    console.warn("VITE_PRIVY_APP_ID is not set. Privy integration will not work.");
+  }
+
   return (
     <NetworkProvider>
-      <WalletAdapterWrapper>{children}</WalletAdapterWrapper>
+      <PrivyProvider
+        appId={privyAppId || "placeholder"}
+        config={{
+          loginMethods: ["email", "google", "twitter", "discord", "github"],
+          appearance: {
+            theme: "dark",
+          },
+        }}
+      >
+        <WalletAdapterWrapper>{children}</WalletAdapterWrapper>
+      </PrivyProvider>
     </NetworkProvider>
   );
 }

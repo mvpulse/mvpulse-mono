@@ -16,13 +16,13 @@ import {
   TrendingUp,
   ArrowUpRight
 } from "lucide-react";
-import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { useContract } from "@/hooks/useContract";
+import { useWalletConnection } from "@/hooks/useWalletConnection";
 import type { PollWithMeta } from "@/types/poll";
 import { POLL_STATUS } from "@/types/poll";
 
 export default function CreatorDashboard() {
-  const { connected, account } = useWallet();
+  const { isConnected, address } = useWalletConnection();
   const { getAllPolls, contractAddress } = useContract();
 
   const [polls, setPolls] = useState<PollWithMeta[]>([]);
@@ -52,11 +52,11 @@ export default function CreatorDashboard() {
 
   // Filter to only creator's polls
   const myPolls = useMemo(() => {
-    if (!account?.address) return [];
+    if (!address) return [];
     return polls.filter(
-      (p) => p.creator.toLowerCase() === account.address.toString().toLowerCase()
+      (p) => p.creator.toLowerCase() === address.toLowerCase()
     );
-  }, [polls, account?.address]);
+  }, [polls, address]);
 
   const myActivePolls = myPolls.filter((p) => p.isActive);
   const myClosedPolls = myPolls.filter((p) => !p.isActive);
@@ -112,7 +112,7 @@ export default function CreatorDashboard() {
     <Skeleton className="h-48 w-full rounded-xl" />
   );
 
-  if (!connected) {
+  if (!isConnected) {
     return (
       <CreatorLayout title="Creator Dashboard" description="Analytics and insights for your polls">
         <Card className="border-yellow-500/50 bg-yellow-500/10">

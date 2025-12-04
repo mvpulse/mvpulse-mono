@@ -49,8 +49,8 @@ import {
   HandCoins,
   Copy,
 } from "lucide-react";
-import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { useContract } from "@/hooks/useContract";
+import { useWalletConnection } from "@/hooks/useWalletConnection";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { truncateAddress } from "@/lib/contract";
 import type { PollWithMeta } from "@/types/poll";
@@ -60,7 +60,7 @@ import { toast } from "sonner";
 export default function ManagePoll() {
   const { pollId: pollIdParam } = useParams();
   const [, navigate] = useLocation();
-  const { connected, account } = useWallet();
+  const { isConnected, address } = useWalletConnection();
   const { getPoll, closePoll, distributeRewards, withdrawRemaining, contractAddress } = useContract();
   const { config } = useNetwork();
 
@@ -70,7 +70,7 @@ export default function ManagePoll() {
 
   // Modal states
   const [closePollModal, setClosePollModal] = useState(false);
-  const [selectedDistributionMode, setSelectedDistributionMode] = useState(DISTRIBUTION_MODE.MANUAL_PULL);
+  const [selectedDistributionMode, setSelectedDistributionMode] = useState<number>(DISTRIBUTION_MODE.MANUAL_PULL);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const pollId = pollIdParam ? parseInt(pollIdParam, 10) : null;
@@ -99,8 +99,8 @@ export default function ManagePoll() {
   }, [fetchPoll]);
 
   // Check if current user is the poll creator
-  const isCreator = poll && account?.address
-    ? poll.creator.toLowerCase() === account.address.toString().toLowerCase()
+  const isCreator = poll && address
+    ? poll.creator.toLowerCase() === address.toLowerCase()
     : false;
 
   // Redirect if not creator (after loading)
@@ -256,7 +256,7 @@ export default function ManagePoll() {
   }
 
   // Not connected
-  if (!connected) {
+  if (!isConnected) {
     return (
       <CreatorLayout>
         <Card className="border-yellow-500/50 bg-yellow-500/10">

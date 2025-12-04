@@ -7,13 +7,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent } from "@/components/ui/card";
 import { Plus, Filter, Search, RefreshCcw, AlertCircle } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { useContract } from "@/hooks/useContract";
+import { useWalletConnection } from "@/hooks/useWalletConnection";
 import type { PollWithMeta } from "@/types/poll";
 
 export default function Dashboard() {
   const [location] = useLocation();
-  const { connected, account } = useWallet();
+  const { isConnected, address } = useWalletConnection();
   const { getAllPolls, getPollCount, contractAddress } = useContract();
 
   const [role, setRole] = useState<"creator" | "participant">("creator");
@@ -56,7 +56,7 @@ export default function Dashboard() {
 
   // Filter by creator for creator view
   const myPolls = polls.filter(
-    (p) => account?.address && p.creator.toLowerCase() === account.address.toString().toLowerCase()
+    (p) => address && p.creator.toLowerCase() === address.toLowerCase()
   );
   const myActivePolls = myPolls.filter((p) => p.isActive);
   const myClosedPolls = myPolls.filter((p) => !p.isActive);
