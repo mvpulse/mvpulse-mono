@@ -10,8 +10,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { WalletSelectionModal } from "./WalletSelectionModal";
-import { Wallet, LogOut, Copy, ExternalLink, Loader2, AlertTriangle } from "lucide-react";
+import { Wallet, LogOut, Copy, ExternalLink, Loader2, AlertTriangle, Coins } from "lucide-react";
 import { toast } from "sonner";
+import { Link } from "wouter";
 import { usePrivyWallet } from "@/hooks/usePrivyWallet";
 import { useNetwork } from "@/contexts/NetworkContext";
 
@@ -147,6 +148,12 @@ export function WalletButton() {
             <DropdownMenuSeparator />
           </>
         )}
+        <Link href="/wallet">
+          <DropdownMenuItem className="cursor-pointer">
+            <Coins className="w-4 h-4 mr-2" />
+            Wallet
+          </DropdownMenuItem>
+        </Link>
         <DropdownMenuItem onClick={copyAddress} className="cursor-pointer">
           <Copy className="w-4 h-4 mr-2" />
           Copy Address

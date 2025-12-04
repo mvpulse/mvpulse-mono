@@ -8,6 +8,7 @@ import Projects from "@/pages/Projects";
 import CreatePoll from "@/pages/CreatePoll";
 import PollDetails from "@/pages/PollDetails";
 import Admin from "@/pages/Admin";
+import Wallet from "@/pages/Wallet";
 import NotFound from "@/pages/not-found";
 
 // Creator pages
@@ -31,6 +32,7 @@ function App() {
         <Route path="/projects" component={Projects} />
         <Route path="/create" component={CreatePoll} />
         <Route path="/poll/:id" component={PollDetails} />
+        <Route path="/wallet" component={Wallet} />
         <Route path="/admin" component={Admin} />
 
         {/* Creator routes */}
