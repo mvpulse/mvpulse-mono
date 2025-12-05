@@ -13,7 +13,8 @@ import { useWalletConnection } from "@/hooks/useWalletConnection";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { REWARD_TYPE, PLATFORM_FEE_BPS, calculatePlatformFee, calculateNetAmount } from "@/types/poll";
+import { REWARD_TYPE, PLATFORM_FEE_BPS, calculatePlatformFee, calculateNetAmount, COIN_TYPE } from "@/types/poll";
+import { COIN_TYPES, getCoinSymbol, CoinTypeId } from "@/lib/tokens";
 
 // Duration options in seconds
 const DURATION_OPTIONS = {
@@ -39,6 +40,7 @@ export default function CreatePoll() {
 
   // Incentives state
   const [rewardType, setRewardType] = useState<number>(REWARD_TYPE.NONE);
+  const [selectedToken, setSelectedToken] = useState<CoinTypeId>(COIN_TYPES.MOVE);
   // Fixed per vote mode
   const [rewardPerVoter, setRewardPerVoter] = useState("");
   const [targetResponders, setTargetResponders] = useState("");
@@ -173,6 +175,7 @@ export default function CreatePoll() {
         maxVoters,
         durationSecs: DURATION_OPTIONS[duration],
         fundAmount: fundAmountOctas,
+        coinTypeId: selectedToken,
       });
 
       toast.success("Poll Created!", {
@@ -371,6 +374,51 @@ export default function CreatePoll() {
                 </p>
               </div>
 
+              {/* Token Selection */}
+              <div className="space-y-3">
+                <Label>Funding Token</Label>
+                <RadioGroup
+                  value={selectedToken.toString()}
+                  onValueChange={(v) => setSelectedToken(parseInt(v) as CoinTypeId)}
+                  className="grid grid-cols-2 gap-3"
+                >
+                  <div
+                    className={cn(
+                      "flex items-center space-x-3 rounded-md border p-3 cursor-pointer transition-all",
+                      selectedToken === COIN_TYPES.MOVE
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:bg-muted/50"
+                    )}
+                    onClick={() => setSelectedToken(COIN_TYPES.MOVE)}
+                  >
+                    <RadioGroupItem value={COIN_TYPES.MOVE.toString()} id="token-move" />
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-full bg-blue-500/20 flex items-center justify-center">
+                        <span className="text-xs font-bold text-blue-500">M</span>
+                      </div>
+                      <Label htmlFor="token-move" className="cursor-pointer font-medium">MOVE</Label>
+                    </div>
+                  </div>
+                  <div
+                    className={cn(
+                      "flex items-center space-x-3 rounded-md border p-3 cursor-pointer transition-all",
+                      selectedToken === COIN_TYPES.PULSE
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:bg-muted/50"
+                    )}
+                    onClick={() => setSelectedToken(COIN_TYPES.PULSE)}
+                  >
+                    <RadioGroupItem value={COIN_TYPES.PULSE.toString()} id="token-pulse" />
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-full bg-purple-500/20 flex items-center justify-center">
+                        <span className="text-xs font-bold text-purple-500">P</span>
+                      </div>
+                      <Label htmlFor="token-pulse" className="cursor-pointer font-medium">PULSE</Label>
+                    </div>
+                  </div>
+                </RadioGroup>
+              </div>
+
               {/* Reward Type Selection */}
               <div className="space-y-3">
                 <Label>Reward Type</Label>
@@ -431,7 +479,7 @@ export default function CreatePoll() {
                   </p>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label>Reward per voter (MOVE)</Label>
+                      <Label>Reward per voter ({getCoinSymbol(selectedToken)})</Label>
                       <Input
                         type="number"
                         step="0.001"
@@ -463,7 +511,7 @@ export default function CreatePoll() {
                   </p>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label>Total fund (MOVE)</Label>
+                      <Label>Total fund ({getCoinSymbol(selectedToken)})</Label>
                       <Input
                         type="number"
                         step="0.01"
@@ -497,19 +545,19 @@ export default function CreatePoll() {
                   <div className="grid grid-cols-2 gap-2 text-sm">
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Total Deposit:</span>
-                      <span className="font-mono font-medium">{calculations.grossAmount.toFixed(4)} MOVE</span>
+                      <span className="font-mono font-medium">{calculations.grossAmount.toFixed(4)} {getCoinSymbol(selectedToken)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Platform Fee ({PLATFORM_FEE_BPS / 100}%):</span>
-                      <span className="font-mono text-destructive">-{calculations.fee.toFixed(4)} MOVE</span>
+                      <span className="font-mono text-destructive">-{calculations.fee.toFixed(4)} {getCoinSymbol(selectedToken)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Net Reward Pool:</span>
-                      <span className="font-mono font-medium text-green-600">{calculations.netAmount.toFixed(4)} MOVE</span>
+                      <span className="font-mono font-medium text-green-600">{calculations.netAmount.toFixed(4)} {getCoinSymbol(selectedToken)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Per voter:</span>
-                      <span className="font-mono font-medium">~{calculations.rewardPerVoter.toFixed(4)} MOVE</span>
+                      <span className="font-mono font-medium">~{calculations.rewardPerVoter.toFixed(4)} {getCoinSymbol(selectedToken)}</span>
                     </div>
                   </div>
                   <div className="pt-2 border-t border-accent/20 text-xs text-muted-foreground">

@@ -14,6 +14,12 @@ export const DISTRIBUTION_MODE = {
   MANUAL_PUSH: 1,  // Creator triggers distribution to all
 } as const;
 
+// Coin type constants (must match contract)
+export const COIN_TYPE = {
+  APTOS: 0,  // AptosCoin (MOVE)
+  PULSE: 1,  // PULSE token
+} as const;
+
 // Reward type for UI (not stored in contract, derived from reward_per_vote)
 export const REWARD_TYPE = {
   NONE: 0,           // No rewards
@@ -40,6 +46,7 @@ export interface Poll {
   rewards_distributed: boolean;   // Whether rewards have been distributed
   end_time: number;
   status: number;
+  coin_type_id: number;           // 0 = MOVE, 1 = PULSE
 }
 
 // Poll with computed fields for UI
@@ -59,6 +66,7 @@ export interface CreatePollInput {
   maxVoters: number;        // Max voters (0 for unlimited, but only for fixed mode)
   durationSecs: number;
   fundAmount: number;       // Total deposit INCLUDING platform fee (in octas)
+  coinTypeId: number;       // 0 = MOVE, 1 = PULSE
 }
 
 // Vote input

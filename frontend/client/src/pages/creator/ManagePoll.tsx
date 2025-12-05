@@ -55,6 +55,7 @@ import { useNetwork } from "@/contexts/NetworkContext";
 import { truncateAddress } from "@/lib/contract";
 import type { PollWithMeta } from "@/types/poll";
 import { POLL_STATUS, DISTRIBUTION_MODE } from "@/types/poll";
+import { getCoinSymbol, CoinTypeId } from "@/lib/tokens";
 import { toast } from "sonner";
 
 export default function ManagePoll() {
@@ -141,11 +142,11 @@ export default function ManagePoll() {
 
   // Handle distribute rewards
   const handleDistribute = async () => {
-    if (pollId === null) return;
+    if (pollId === null || !poll) return;
 
     setActionLoading("distribute");
     try {
-      const result = await distributeRewards(pollId);
+      const result = await distributeRewards(pollId, poll.coin_type_id as CoinTypeId);
       toast.success("Rewards Distributed!", {
         description: "All voters have received their rewards.",
         action: {
@@ -166,11 +167,11 @@ export default function ManagePoll() {
 
   // Handle withdraw remaining
   const handleWithdraw = async () => {
-    if (pollId === null) return;
+    if (pollId === null || !poll) return;
 
     setActionLoading("withdraw");
     try {
-      const result = await withdrawRemaining(pollId);
+      const result = await withdrawRemaining(pollId, poll.coin_type_id as CoinTypeId);
       toast.success("Funds Withdrawn!", {
         description: "Remaining funds have been returned to your wallet.",
         action: {
@@ -320,7 +321,7 @@ export default function ManagePoll() {
               <span className="text-sm">Reward Pool</span>
             </div>
             <p className="text-2xl font-bold font-mono">{rewardPoolMove.toFixed(4)}</p>
-            <p className="text-xs text-muted-foreground">MOVE</p>
+            <p className="text-xs text-muted-foreground">{getCoinSymbol(poll.coin_type_id as CoinTypeId)}</p>
           </CardContent>
         </Card>
         <Card className="bg-card/50">
@@ -346,7 +347,7 @@ export default function ManagePoll() {
             <p className="text-2xl font-bold font-mono">
               {estimatedRewardPerVoter > 0 ? `~${estimatedRewardPerVoter.toFixed(4)}` : "0"}
             </p>
-            <p className="text-xs text-muted-foreground">MOVE</p>
+            <p className="text-xs text-muted-foreground">{getCoinSymbol(poll.coin_type_id as CoinTypeId)}</p>
           </CardContent>
         </Card>
       </div>
@@ -584,6 +585,10 @@ export default function ManagePoll() {
                   <span className="text-xs">
                     {poll.reward_per_vote > 0 ? "Fixed per vote" : "Equal split"}
                   </span>
+                </li>
+                <li className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Token</span>
+                  <Badge variant="outline">{getCoinSymbol(poll.coin_type_id as CoinTypeId)}</Badge>
                 </li>
               </ul>
               <div className="mt-4 pt-4 border-t border-border/50">

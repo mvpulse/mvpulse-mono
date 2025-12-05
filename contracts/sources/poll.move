@@ -1,5 +1,6 @@
 /// Poll module for MovePoll dApp
 /// Allows creating polls, voting, and distributing rewards
+/// Supports multiple coin types (MOVE, PULSE, etc.)
 module contracts::poll {
     use std::string::String;
     use std::vector;
@@ -27,6 +28,8 @@ module contracts::poll {
     const E_INVALID_FEE: u64 = 15;
     const E_NOT_ADMIN: u64 = 16;
     const E_DISTRIBUTION_MODE_NOT_SET: u64 = 17;
+    const E_INVALID_COIN_TYPE: u64 = 18;
+    const E_COIN_TYPE_MISMATCH: u64 = 19;
 
     /// Poll status
     const STATUS_ACTIVE: u8 = 0;
@@ -37,6 +40,10 @@ module contracts::poll {
     const DISTRIBUTION_UNSET: u8 = 255;       // Not yet selected
     const DISTRIBUTION_MANUAL_PULL: u8 = 0;   // Participants manually claim rewards
     const DISTRIBUTION_MANUAL_PUSH: u8 = 1;   // Creator triggers distribution to all
+
+    /// Coin type identifiers
+    const COIN_TYPE_APTOS: u8 = 0;    // AptosCoin (MOVE)
+    const COIN_TYPE_PULSE: u8 = 1;    // PULSE token
 
     /// Fee constants
     const MAX_FEE_BPS: u64 = 1000;  // Max 10% fee
@@ -59,6 +66,7 @@ module contracts::poll {
         rewards_distributed: bool,
         end_time: u64,
         status: u8,
+        coin_type_id: u8,             // 0 = AptosCoin, 1 = PULSE
     }
 
     /// Global poll registry stored at contract address
@@ -71,9 +79,9 @@ module contracts::poll {
         total_fees_collected: u64,    // Track total fees collected
     }
 
-    /// Reward vault to hold tokens for polls
-    struct RewardVault has key {
-        coins: coin::Coin<AptosCoin>,
+    /// Reward vault to hold tokens for polls - generic over coin type
+    struct RewardVault<phantom CoinType> has key {
+        coins: coin::Coin<CoinType>,
     }
 
     #[event]
@@ -85,6 +93,7 @@ module contracts::poll {
         reward_pool: u64,
         max_voters: u64,
         platform_fee: u64,
+        coin_type_id: u8,
     }
 
     #[event]
@@ -122,6 +131,7 @@ module contracts::poll {
     }
 
     /// Initialize the poll registry (call once when deploying)
+    /// Also initializes the AptosCoin vault
     public entry fun initialize(account: &signer) {
         let admin_addr = signer::address_of(account);
         let registry = PollRegistry {
@@ -134,9 +144,24 @@ module contracts::poll {
         };
         move_to(account, registry);
 
-        // Initialize the reward vault
-        let vault = RewardVault {
+        // Initialize the reward vault for AptosCoin (default)
+        let vault = RewardVault<AptosCoin> {
             coins: coin::zero<AptosCoin>(),
+        };
+        move_to(account, vault);
+    }
+
+    /// Initialize vault for additional coin types (call once per coin type)
+    /// Only admin can call this
+    public entry fun initialize_vault<CoinType>(
+        account: &signer,
+        registry_addr: address
+    ) acquires PollRegistry {
+        let registry = borrow_global<PollRegistry>(registry_addr);
+        assert!(signer::address_of(account) == registry.admin, E_NOT_ADMIN);
+
+        let vault = RewardVault<CoinType> {
+            coins: coin::zero<CoinType>(),
         };
         move_to(account, vault);
     }
@@ -145,7 +170,8 @@ module contracts::poll {
     /// reward_per_vote: Fixed amount per voter, or 0 for equal split mode
     /// max_voters: Maximum number of voters (required for equal split, optional for fixed)
     /// fund_amount: Total amount to deposit (includes platform fee)
-    public entry fun create_poll(
+    /// coin_type_id: 0 = AptosCoin (MOVE), 1 = PULSE
+    public entry fun create_poll<CoinType>(
         account: &signer,
         registry_addr: address,
         title: String,
@@ -155,9 +181,13 @@ module contracts::poll {
         max_voters: u64,
         duration_secs: u64,
         fund_amount: u64,
+        coin_type_id: u8,
     ) acquires PollRegistry, RewardVault {
         let creator = signer::address_of(account);
         let registry = borrow_global_mut<PollRegistry>(registry_addr);
+
+        // Validate coin_type_id
+        assert!(coin_type_id <= COIN_TYPE_PULSE, E_INVALID_COIN_TYPE);
 
         // Calculate and collect platform fee
         let reward_pool = 0u64;
@@ -170,14 +200,14 @@ module contracts::poll {
 
             // Transfer fee to treasury
             if (platform_fee > 0) {
-                let fee_coins = coin::withdraw<AptosCoin>(account, platform_fee);
+                let fee_coins = coin::withdraw<CoinType>(account, platform_fee);
                 coin::deposit(registry.platform_treasury, fee_coins);
                 registry.total_fees_collected = registry.total_fees_collected + platform_fee;
             };
 
             // Transfer net amount to vault
-            let vault = borrow_global_mut<RewardVault>(registry_addr);
-            let payment = coin::withdraw<AptosCoin>(account, net_amount);
+            let vault = borrow_global_mut<RewardVault<CoinType>>(registry_addr);
+            let payment = coin::withdraw<CoinType>(account, net_amount);
             coin::merge(&mut vault.coins, payment);
             reward_pool = net_amount;
         };
@@ -209,6 +239,7 @@ module contracts::poll {
             rewards_distributed: false,
             end_time: timestamp::now_seconds() + duration_secs,
             status: STATUS_ACTIVE,
+            coin_type_id,
         };
 
         vector::push_back(&mut registry.polls, poll);
@@ -221,11 +252,12 @@ module contracts::poll {
             reward_pool,
             max_voters,
             platform_fee,
+            coin_type_id,
         });
     }
 
     /// Add funds to an existing poll (only creator can add funds)
-    public entry fun fund_poll(
+    public entry fun fund_poll<CoinType>(
         account: &signer,
         registry_addr: address,
         poll_id: u64,
@@ -245,14 +277,14 @@ module contracts::poll {
 
         // Transfer fee to treasury
         if (platform_fee > 0) {
-            let fee_coins = coin::withdraw<AptosCoin>(account, platform_fee);
+            let fee_coins = coin::withdraw<CoinType>(account, platform_fee);
             coin::deposit(registry.platform_treasury, fee_coins);
             registry.total_fees_collected = registry.total_fees_collected + platform_fee;
         };
 
         // Transfer net amount to vault
-        let vault = borrow_global_mut<RewardVault>(registry_addr);
-        let payment = coin::withdraw<AptosCoin>(account, net_amount);
+        let vault = borrow_global_mut<RewardVault<CoinType>>(registry_addr);
+        let payment = coin::withdraw<CoinType>(account, net_amount);
         coin::merge(&mut vault.coins, payment);
 
         poll.reward_pool = poll.reward_pool + net_amount;
@@ -351,7 +383,7 @@ module contracts::poll {
 
     /// Claim reward (for Manual Pull distribution mode)
     /// Only voters can claim, and only once
-    public entry fun claim_reward(
+    public entry fun claim_reward<CoinType>(
         account: &signer,
         registry_addr: address,
         poll_id: u64,
@@ -406,7 +438,7 @@ module contracts::poll {
 
         if (reward_amount > 0) {
             // Transfer reward from vault to claimer
-            let vault = borrow_global_mut<RewardVault>(registry_addr);
+            let vault = borrow_global_mut<RewardVault<CoinType>>(registry_addr);
             let reward_coins = coin::extract(&mut vault.coins, reward_amount);
             coin::deposit(claimer, reward_coins);
 
@@ -426,7 +458,7 @@ module contracts::poll {
 
     /// Distribute rewards to all voters (for Manual Push distribution mode)
     /// Only creator can call this
-    public entry fun distribute_rewards(
+    public entry fun distribute_rewards<CoinType>(
         account: &signer,
         registry_addr: address,
         poll_id: u64,
@@ -453,7 +485,7 @@ module contracts::poll {
                 poll.reward_pool / (voter_count as u64)
             };
 
-            let vault = borrow_global_mut<RewardVault>(registry_addr);
+            let vault = borrow_global_mut<RewardVault<CoinType>>(registry_addr);
 
             let i = 0;
             while (i < voter_count) {
@@ -485,7 +517,7 @@ module contracts::poll {
     }
 
     /// Withdraw remaining funds from a poll (only creator, only after distribution)
-    public entry fun withdraw_remaining(
+    public entry fun withdraw_remaining<CoinType>(
         account: &signer,
         registry_addr: address,
         poll_id: u64,
@@ -501,7 +533,7 @@ module contracts::poll {
 
         let remaining = poll.reward_pool;
         if (remaining > 0) {
-            let vault = borrow_global_mut<RewardVault>(registry_addr);
+            let vault = borrow_global_mut<RewardVault<CoinType>>(registry_addr);
             let coins = coin::extract(&mut vault.coins, remaining);
             coin::deposit(caller, coins);
             poll.reward_pool = 0;

@@ -4,10 +4,11 @@ import { useNetwork } from "@/contexts/NetworkContext";
 import { createAptosClient, getFunctionId, formatTimeRemaining, isPollActive } from "@/lib/contract";
 import { usePrivyWallet } from "@/hooks/usePrivyWallet";
 import { submitPrivyTransaction } from "@/lib/privy-transactions";
+import { getCoinTypeArg, CoinTypeId, COIN_TYPES } from "@/lib/tokens";
 import type { Poll, PollWithMeta, CreatePollInput, VoteInput, TransactionResult, PlatformConfig } from "@/types/poll";
 
 export function useContract() {
-  const { config } = useNetwork();
+  const { config, network } = useNetwork();
   const { signAndSubmitTransaction, account } = useWallet();
   const {
     isPrivyWallet,
@@ -45,7 +46,8 @@ export function useContract() {
     async (
       functionName: string,
       functionArguments: (string | number | boolean | string[])[],
-      errorMessage: string
+      errorMessage: string,
+      typeArguments: string[] = []
     ): Promise<TransactionResult> => {
       if (isPrivyWallet) {
         if (!privyAddress || !privyPublicKey || !signRawHash) {
@@ -59,7 +61,7 @@ export function useContract() {
           signRawHash,
           {
             function: getFunctionId(contractAddress, functionName),
-            typeArguments: [],
+            typeArguments,
             functionArguments,
           }
         );
@@ -73,7 +75,7 @@ export function useContract() {
         const response = await signAndSubmitTransaction({
           data: {
             function: getFunctionId(contractAddress, functionName),
-            typeArguments: [],
+            typeArguments,
             functionArguments,
           },
         });
@@ -91,6 +93,9 @@ export function useContract() {
       setError(null);
 
       try {
+        const coinTypeId = input.coinTypeId ?? COIN_TYPES.MOVE;
+        const coinTypeArg = getCoinTypeArg(coinTypeId as CoinTypeId, network);
+
         return await executeTransaction(
           "create_poll",
           [
@@ -102,8 +107,10 @@ export function useContract() {
             input.maxVoters.toString(),
             input.durationSecs.toString(),
             input.fundAmount.toString(),
+            coinTypeId.toString(), // coin_type_id
           ],
-          "Failed to create poll"
+          "Failed to create poll",
+          [coinTypeArg] // type argument
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to create poll";
@@ -113,20 +120,23 @@ export function useContract() {
         setLoading(false);
       }
     },
-    [executeTransaction, contractAddress]
+    [executeTransaction, contractAddress, network]
   );
 
   // Fund an existing poll
   const fundPoll = useCallback(
-    async (pollId: number, amount: number): Promise<TransactionResult> => {
+    async (pollId: number, amount: number, coinTypeId: CoinTypeId = COIN_TYPES.MOVE): Promise<TransactionResult> => {
       setLoading(true);
       setError(null);
 
       try {
+        const coinTypeArg = getCoinTypeArg(coinTypeId, network);
+
         return await executeTransaction(
           "fund_poll",
           [contractAddress, pollId.toString(), amount.toString()],
-          "Failed to fund poll"
+          "Failed to fund poll",
+          [coinTypeArg]
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to fund poll";
@@ -136,20 +146,23 @@ export function useContract() {
         setLoading(false);
       }
     },
-    [executeTransaction, contractAddress]
+    [executeTransaction, contractAddress, network]
   );
 
   // Claim reward (for Manual Pull mode)
   const claimReward = useCallback(
-    async (pollId: number): Promise<TransactionResult> => {
+    async (pollId: number, coinTypeId: CoinTypeId = COIN_TYPES.MOVE): Promise<TransactionResult> => {
       setLoading(true);
       setError(null);
 
       try {
+        const coinTypeArg = getCoinTypeArg(coinTypeId, network);
+
         return await executeTransaction(
           "claim_reward",
           [contractAddress, pollId.toString()],
-          "Failed to claim reward"
+          "Failed to claim reward",
+          [coinTypeArg]
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to claim reward";
@@ -159,20 +172,23 @@ export function useContract() {
         setLoading(false);
       }
     },
-    [executeTransaction, contractAddress]
+    [executeTransaction, contractAddress, network]
   );
 
   // Distribute rewards to all voters (for Manual Push mode)
   const distributeRewards = useCallback(
-    async (pollId: number): Promise<TransactionResult> => {
+    async (pollId: number, coinTypeId: CoinTypeId = COIN_TYPES.MOVE): Promise<TransactionResult> => {
       setLoading(true);
       setError(null);
 
       try {
+        const coinTypeArg = getCoinTypeArg(coinTypeId, network);
+
         return await executeTransaction(
           "distribute_rewards",
           [contractAddress, pollId.toString()],
-          "Failed to distribute rewards"
+          "Failed to distribute rewards",
+          [coinTypeArg]
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to distribute rewards";
@@ -182,20 +198,23 @@ export function useContract() {
         setLoading(false);
       }
     },
-    [executeTransaction, contractAddress]
+    [executeTransaction, contractAddress, network]
   );
 
   // Withdraw remaining funds from a poll
   const withdrawRemaining = useCallback(
-    async (pollId: number): Promise<TransactionResult> => {
+    async (pollId: number, coinTypeId: CoinTypeId = COIN_TYPES.MOVE): Promise<TransactionResult> => {
       setLoading(true);
       setError(null);
 
       try {
+        const coinTypeArg = getCoinTypeArg(coinTypeId, network);
+
         return await executeTransaction(
           "withdraw_remaining",
           [contractAddress, pollId.toString()],
-          "Failed to withdraw funds"
+          "Failed to withdraw funds",
+          [coinTypeArg]
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to withdraw funds";
@@ -205,7 +224,7 @@ export function useContract() {
         setLoading(false);
       }
     },
-    [executeTransaction, contractAddress]
+    [executeTransaction, contractAddress, network]
   );
 
   // Vote on a poll
