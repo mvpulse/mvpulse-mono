@@ -14,12 +14,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Trophy, Clock, Share2, AlertCircle, Loader2, Wallet, CheckCircle2, Gift, Send, Coins, XCircle, Users, HandCoins } from "lucide-react";
+import { Trophy, Clock, Share2, AlertCircle, Loader2, Wallet, CheckCircle2, Gift, Send, Coins, XCircle, Users, HandCoins, Flame } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import { useContract } from "@/hooks/useContract";
 import { useWalletConnection } from "@/hooks/useWalletConnection";
 import { useNetwork } from "@/contexts/NetworkContext";
+import { useVoteLimit } from "@/hooks/useVoteLimit";
+import { useSeason } from "@/hooks/useQuests";
 import { truncateAddress } from "@/lib/contract";
 import { getCoinSymbol, CoinTypeId, COIN_TYPES } from "@/lib/tokens";
 import type { PollWithMeta } from "@/types/poll";
@@ -39,6 +41,23 @@ export default function PollDetails() {
     loading: contractLoading,
   } = useContract();
   const { config } = useNetwork();
+
+  // Vote limit tracking
+  const {
+    canVote: canVoteToday,
+    votesRemaining,
+    votesUsed,
+    tierLimit,
+    tier,
+    tierName,
+    currentStreak,
+    recordVote,
+    isRecordingVote,
+    refetch: refetchVoteLimit,
+  } = useVoteLimit(address);
+
+  // Season tracking for quest progress
+  const { season } = useSeason();
 
   const [poll, setPoll] = useState<PollWithMeta | null>(null);
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
@@ -107,6 +126,14 @@ export default function PollDetails() {
       return;
     }
 
+    // Check vote limit before proceeding
+    if (!canVoteToday) {
+      toast.error("Daily Vote Limit Reached", {
+        description: `You've used all ${tierLimit} votes for today. Come back tomorrow or upgrade your tier!`,
+      });
+      return;
+    }
+
     setIsVoting(true);
     try {
       const result = await vote({ pollId, optionIndex: selectedOption });
@@ -121,6 +148,26 @@ export default function PollDetails() {
 
       setUserHasVoted(true);
       setUserVotedOption(selectedOption);
+
+      // Record vote in backend for streak/quest tracking
+      try {
+        const recordResult = await recordVote({ pollId, seasonId: season?.id });
+
+        // Show toast if any quests were completed
+        if (recordResult.questsCompleted?.length > 0) {
+          for (const quest of recordResult.questsCompleted) {
+            toast.success(`Quest Completed: ${quest.questName}`, {
+              description: `+${quest.pointsAwarded} points!`,
+            });
+          }
+        }
+
+        // Refetch vote limit to update UI
+        refetchVoteLimit();
+      } catch (recordError) {
+        console.error("Failed to record vote in backend:", recordError);
+        // Don't show error to user - the on-chain vote succeeded
+      }
 
       // Refresh poll data to get updated vote counts
       await fetchPollData();
@@ -343,6 +390,49 @@ export default function PollDetails() {
             </Card>
           )}
 
+          {/* Vote Limit & Tier Display */}
+          {isConnected && poll.isActive && !userHasVoted && (
+            <Card className={`${canVoteToday ? 'border-primary/30 bg-primary/5' : 'border-red-500/30 bg-red-500/5'}`}>
+              <CardContent className="py-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2 rounded-full ${canVoteToday ? 'bg-primary/20' : 'bg-red-500/20'}`}>
+                      <Users className={`w-4 h-4 ${canVoteToday ? 'text-primary' : 'text-red-500'}`} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">
+                        {canVoteToday ? (
+                          <>Daily Votes: <span className="font-mono">{votesUsed}/{tierLimit}</span></>
+                        ) : (
+                          <span className="text-red-500">Daily limit reached</span>
+                        )}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {tierName} Tier ({tierLimit} votes/day)
+                        {currentStreak > 0 && (
+                          <span className="ml-2 inline-flex items-center gap-1">
+                            <Flame className="w-3 h-3 text-orange-500" />
+                            {currentStreak} day streak
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  {votesRemaining > 0 && (
+                    <Badge variant="outline" className="bg-primary/10 text-primary border-primary/30">
+                      {votesRemaining} remaining
+                    </Badge>
+                  )}
+                </div>
+                {!canVoteToday && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Come back tomorrow or hold more PULSE to increase your tier!
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           <Card className="border-primary/20 bg-card/50 backdrop-blur-sm overflow-hidden">
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary to-accent" />
             <CardHeader>
@@ -403,19 +493,32 @@ export default function PollDetails() {
             </CardContent>
             <CardFooter className="bg-muted/20 border-t border-border/50 pt-6">
               {!userHasVoted && poll.isActive ? (
-                <Button
-                  className="w-full bg-primary text-primary-foreground hover:bg-primary/90 font-bold text-lg h-12"
-                  disabled={selectedOption === null || !isConnected || isVoting || contractLoading}
-                  onClick={handleVote}
-                >
-                  {isVoting ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Submitting Vote...
-                    </>
-                  ) : (
-                    "Confirm Vote"
+                <div className="w-full space-y-2">
+                  <Button
+                    className={`w-full font-bold text-lg h-12 ${
+                      !canVoteToday
+                        ? 'bg-muted text-muted-foreground cursor-not-allowed'
+                        : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                    }`}
+                    disabled={selectedOption === null || !isConnected || isVoting || contractLoading || !canVoteToday || isRecordingVote}
+                    onClick={handleVote}
+                  >
+                    {isVoting || isRecordingVote ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" /> {isRecordingVote ? "Recording..." : "Submitting Vote..."}
+                      </>
+                    ) : !canVoteToday ? (
+                      "Daily Limit Reached"
+                    ) : (
+                      "Confirm Vote"
+                    )}
+                  </Button>
+                  {!canVoteToday && isConnected && (
+                    <p className="text-xs text-center text-muted-foreground">
+                      Hold more PULSE or maintain your streak to unlock more votes
+                    </p>
                   )}
-                </Button>
+                </div>
               ) : (
                 <Button variant="outline" className="w-full" onClick={handleShare}>
                   <Share2 className="w-4 h-4 mr-2" /> Share Poll

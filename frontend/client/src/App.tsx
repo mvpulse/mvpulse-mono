@@ -24,6 +24,8 @@ import Distributions from "@/pages/creator/Distributions";
 import ParticipantDashboard from "@/pages/participant/ParticipantDashboard";
 import VotingHistory from "@/pages/participant/VotingHistory";
 import Rewards from "@/pages/participant/Rewards";
+import Quests from "@/pages/participant/Quests";
+import Leaderboard from "@/pages/Leaderboard";
 
 function App() {
   return (
@@ -48,8 +50,10 @@ function App() {
 
             {/* Participant routes */}
             <Route path="/participant" component={ParticipantDashboard} />
+            <Route path="/participant/quests" component={Quests} />
             <Route path="/participant/history" component={VotingHistory} />
             <Route path="/participant/rewards" component={Rewards} />
+            <Route path="/leaderboard" component={Leaderboard} />
 
             <Route component={NotFound} />
           </Switch>
