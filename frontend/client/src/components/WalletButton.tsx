@@ -120,8 +120,8 @@ export function WalletButton() {
                   Privy
                 </Badge>
               ) : (
-                wallet?.icon && (
-                  <img src={wallet.icon} alt={wallet.name} className="w-4 h-4" />
+                (wallet as { icon?: string; name?: string } | null)?.icon && (
+                  <img src={(wallet as { icon?: string; name?: string }).icon} alt={(wallet as { name?: string }).name || "Wallet"} className="w-4 h-4" />
                 )
               )}
               {activeAddress ? truncateAddress(activeAddress) : "Connected"}

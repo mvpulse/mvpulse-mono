@@ -190,8 +190,11 @@ export default function ParticipantDashboard() {
 
   return (
     <ParticipantLayout title="Participant Dashboard" description="Track your votes and rewards">
+      {/* Hidden tour welcome target */}
+      <div data-tour="participant-welcome" className="sr-only" />
+
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <div data-tour="participant-stats" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         {isLoading ? (
           <>
             <StatSkeleton />
@@ -254,7 +257,7 @@ export default function ParticipantDashboard() {
 
       {/* Claimable Rewards Section */}
       {claimablePolls.length > 0 && (
-        <Card className="mb-8 border-green-500/30 bg-green-500/5">
+        <Card data-tour="claimable-rewards" className="mb-8 border-green-500/30 bg-green-500/5">
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               <Gift className="w-5 h-5 text-green-500" />
@@ -352,7 +355,7 @@ export default function ParticipantDashboard() {
       </div>
 
       {/* Recommended Polls */}
-      <div>
+      <div data-tour="recommended-polls">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold">Recommended Polls</h2>
           <Button variant="outline" size="sm" onClick={fetchPolls}>

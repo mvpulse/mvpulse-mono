@@ -1,7 +1,8 @@
-import { ReactNode } from "react";
-import { LayoutDashboard, History, Gift, Compass, Settings } from "lucide-react";
+import { ReactNode, useEffect } from "react";
+import { LayoutDashboard, History, Gift, Compass, Settings, HelpCircle } from "lucide-react";
 import { DashboardSidebar, type SidebarSection } from "@/components/DashboardSidebar";
 import { useSidebar } from "@/contexts/SidebarContext";
+import { useTour } from "@/contexts/TourContext";
 import { cn } from "@/lib/utils";
 
 interface ParticipantLayoutProps {
@@ -12,21 +13,38 @@ interface ParticipantLayoutProps {
 
 export function ParticipantLayout({ children, title, description }: ParticipantLayoutProps) {
   const { isCollapsed } = useSidebar();
+  const { hasCompletedTour, startTour, isTourRunning } = useTour();
+
+  // Auto-start tour on first visit
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!hasCompletedTour("participant") && !isTourRunning) {
+        startTour("participant");
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [hasCompletedTour, startTour, isTourRunning]);
 
   const sidebarSections: SidebarSection[] = [
     {
       title: "Participant",
       items: [
         { label: "Dashboard", icon: LayoutDashboard, href: "/participant" },
-        { label: "Voting History", icon: History, href: "/participant/history" },
-        { label: "Rewards", icon: Gift, href: "/participant/rewards" },
+        { label: "Voting History", icon: History, href: "/participant/history", dataTour: "sidebar-voting-history" },
+        { label: "Rewards", icon: Gift, href: "/participant/rewards", dataTour: "sidebar-rewards" },
       ],
     },
     {
       title: "Quick Actions",
       items: [
-        { label: "Explore Polls", icon: Compass, href: "/dashboard" },
+        { label: "Explore Polls", icon: Compass, href: "/dashboard", dataTour: "sidebar-explore-polls" },
         { label: "Settings", icon: Settings, href: "/settings" },
+      ],
+    },
+    {
+      title: "Help",
+      items: [
+        { label: "Start Tour", icon: HelpCircle, href: "#tour", isTourTrigger: true, dataTour: "sidebar-help" },
       ],
     },
   ];

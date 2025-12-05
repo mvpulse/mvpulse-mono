@@ -1,7 +1,9 @@
 import { Switch, Route } from "wouter";
 import { Layout } from "@/components/Layout";
 import { AIChatAssistant } from "@/components/AIChatAssistant";
+import { GuidedTour } from "@/components/GuidedTour";
 import { SidebarProvider } from "@/contexts/SidebarContext";
+import { TourProvider } from "@/contexts/TourContext";
 import Home from "@/pages/Home";
 import Dashboard from "@/pages/Dashboard";
 import Projects from "@/pages/Projects";
@@ -26,32 +28,35 @@ import Rewards from "@/pages/participant/Rewards";
 function App() {
   return (
     <SidebarProvider>
-      <Layout>
-      <Switch>
-        <Route path="/" component={Home} />
-        <Route path="/dashboard" component={Dashboard} />
-        <Route path="/projects" component={Projects} />
-        <Route path="/create" component={CreatePoll} />
-        <Route path="/poll/:id" component={PollDetails} />
-        <Route path="/wallet" component={Wallet} />
-        <Route path="/swap" component={Swap} />
-        <Route path="/admin" component={Admin} />
+      <TourProvider>
+        <Layout>
+          <Switch>
+            <Route path="/" component={Home} />
+            <Route path="/dashboard" component={Dashboard} />
+            <Route path="/projects" component={Projects} />
+            <Route path="/create" component={CreatePoll} />
+            <Route path="/poll/:id" component={PollDetails} />
+            <Route path="/wallet" component={Wallet} />
+            <Route path="/swap" component={Swap} />
+            <Route path="/admin" component={Admin} />
 
-        {/* Creator routes */}
-        <Route path="/creator" component={CreatorDashboard} />
-        <Route path="/creator/manage/:pollId" component={ManagePoll} />
-        <Route path="/creator/manage" component={ManagePolls} />
-        <Route path="/creator/distributions" component={Distributions} />
+            {/* Creator routes */}
+            <Route path="/creator" component={CreatorDashboard} />
+            <Route path="/creator/manage/:pollId" component={ManagePoll} />
+            <Route path="/creator/manage" component={ManagePolls} />
+            <Route path="/creator/distributions" component={Distributions} />
 
-        {/* Participant routes */}
-        <Route path="/participant" component={ParticipantDashboard} />
-        <Route path="/participant/history" component={VotingHistory} />
-        <Route path="/participant/rewards" component={Rewards} />
+            {/* Participant routes */}
+            <Route path="/participant" component={ParticipantDashboard} />
+            <Route path="/participant/history" component={VotingHistory} />
+            <Route path="/participant/rewards" component={Rewards} />
 
-        <Route component={NotFound} />
-      </Switch>
-      <AIChatAssistant />
-      </Layout>
+            <Route component={NotFound} />
+          </Switch>
+          <AIChatAssistant />
+          <GuidedTour />
+        </Layout>
+      </TourProvider>
     </SidebarProvider>
   );
 }

@@ -58,7 +58,7 @@ export default function ManagePolls() {
     open: false,
     pollId: null,
   });
-  const [selectedDistributionMode, setSelectedDistributionMode] = useState<number>(DISTRIBUTION_MODE.MANUAL_PULL);
+  const [selectedDistributionMode, setSelectedDistributionMode] = useState<number>(DISTRIBUTION_MODE.MANUAL_PULL as number);
   const [actionLoading, setActionLoading] = useState<{ type: string; pollId: number } | null>(null);
 
   // Fetch polls

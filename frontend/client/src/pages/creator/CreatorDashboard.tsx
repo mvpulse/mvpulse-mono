@@ -129,8 +129,11 @@ export default function CreatorDashboard() {
 
   return (
     <CreatorLayout title="Creator Dashboard" description="Analytics and insights for your polls">
+      {/* Hidden tour welcome target */}
+      <div data-tour="creator-welcome" className="sr-only" />
+
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <div data-tour="creator-stats" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         {isLoading ? (
           <>
             <StatSkeleton />
@@ -247,7 +250,7 @@ export default function CreatorDashboard() {
             <RefreshCcw className="w-4 h-4 mr-2" /> Refresh
           </Button>
           <Link href="/create">
-            <Button size="sm">
+            <Button size="sm" data-tour="creator-create-poll">
               <Plus className="w-4 h-4 mr-2" /> Create Poll
             </Button>
           </Link>
@@ -275,7 +278,7 @@ export default function CreatorDashboard() {
         </Card>
       ) : (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div data-tour="recent-polls" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {myPolls.slice(0, 6).map(renderPollCard)}
           </div>
           {myPolls.length > 6 && (

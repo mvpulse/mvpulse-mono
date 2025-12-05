@@ -1,7 +1,8 @@
-import { ReactNode, useMemo } from "react";
-import { LayoutDashboard, FolderCog, Send, TrendingUp, PlusCircle, Settings } from "lucide-react";
+import { ReactNode, useMemo, useEffect } from "react";
+import { LayoutDashboard, FolderCog, Send, TrendingUp, PlusCircle, Settings, HelpCircle } from "lucide-react";
 import { DashboardSidebar, type SidebarSection } from "@/components/DashboardSidebar";
 import { useSidebar } from "@/contexts/SidebarContext";
+import { useTour } from "@/contexts/TourContext";
 import { cn } from "@/lib/utils";
 
 interface CreatorLayoutProps {
@@ -12,6 +13,17 @@ interface CreatorLayoutProps {
 
 export function CreatorLayout({ children, title, description }: CreatorLayoutProps) {
   const { isCollapsed } = useSidebar();
+  const { hasCompletedTour, startTour, isTourRunning } = useTour();
+
+  // Auto-start tour on first visit
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!hasCompletedTour("creator") && !isTourRunning) {
+        startTour("creator");
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [hasCompletedTour, startTour, isTourRunning]);
 
   // Get poll counts for badges
   const pollCount = useMemo(() => {
@@ -25,8 +37,8 @@ export function CreatorLayout({ children, title, description }: CreatorLayoutPro
       title: "Creator",
       items: [
         { label: "Dashboard", icon: LayoutDashboard, href: "/creator", badge: pollCount },
-        { label: "Manage Polls", icon: FolderCog, href: "/creator/manage" },
-        { label: "Distributions", icon: Send, href: "/creator/distributions" },
+        { label: "Manage Polls", icon: FolderCog, href: "/creator/manage", dataTour: "sidebar-manage-polls" },
+        { label: "Distributions", icon: Send, href: "/creator/distributions", dataTour: "sidebar-distributions" },
       ],
     },
     {
@@ -35,6 +47,12 @@ export function CreatorLayout({ children, title, description }: CreatorLayoutPro
         { label: "Analytics", icon: TrendingUp, href: "/creator/analytics" },
         { label: "Create Poll", icon: PlusCircle, href: "/create" },
         { label: "Settings", icon: Settings, href: "/settings" },
+      ],
+    },
+    {
+      title: "Help",
+      items: [
+        { label: "Start Tour", icon: HelpCircle, href: "#tour", isTourTrigger: true, dataTour: "sidebar-help" },
       ],
     },
   ];

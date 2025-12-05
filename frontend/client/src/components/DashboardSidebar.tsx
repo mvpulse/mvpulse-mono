@@ -9,6 +9,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { useSidebar } from "@/contexts/SidebarContext";
+import { useTour, type TourRole } from "@/contexts/TourContext";
 import type { LucideIcon } from "lucide-react";
 
 export interface SidebarItem {
@@ -16,6 +17,8 @@ export interface SidebarItem {
   icon: LucideIcon;
   href: string;
   badge?: number | string;
+  dataTour?: string;
+  isTourTrigger?: boolean;
 }
 
 export interface SidebarSection {
@@ -30,7 +33,15 @@ interface DashboardSidebarProps {
 export function DashboardSidebar({ sections }: DashboardSidebarProps) {
   const [location] = useLocation();
   const { isCollapsed, toggle } = useSidebar();
+  const { startTour } = useTour();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+
+  // Determine tour role based on current location
+  const getTourRole = (): TourRole | null => {
+    if (location.startsWith("/creator")) return "creator";
+    if (location.startsWith("/participant")) return "participant";
+    return null;
+  };
 
   // Close mobile sheet on navigation
   useEffect(() => {
@@ -57,10 +68,42 @@ export function DashboardSidebar({ sections }: DashboardSidebarProps) {
             <nav className="space-y-1">
               {section.items.map((item) => {
                 const isActive = location === item.href || location.startsWith(item.href + "/");
+
+                // Handle tour trigger button
+                if (item.isTourTrigger) {
+                  return (
+                    <button
+                      key={item.href}
+                      onClick={() => {
+                        const role = getTourRole();
+                        if (role) startTour(role);
+                      }}
+                      data-tour={item.dataTour}
+                      className={cn(
+                        "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all w-full",
+                        "hover:bg-primary/10 hover:text-primary",
+                        "text-muted-foreground",
+                        isCollapsed && !mobile && "justify-center px-2"
+                      )}
+                      title={isCollapsed && !mobile ? item.label : undefined}
+                    >
+                      <item.icon className={cn(
+                        "shrink-0",
+                        isCollapsed && !mobile ? "w-5 h-5" : "w-4 h-4"
+                      )} />
+                      {(!isCollapsed || mobile) && (
+                        <span className="flex-1 text-left">{item.label}</span>
+                      )}
+                    </button>
+                  );
+                }
+
+                // Regular link rendering
                 return (
                   <Link
                     key={item.href}
                     href={item.href}
+                    data-tour={item.dataTour}
                     className={cn(
                       "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all",
                       "hover:bg-primary/10 hover:text-primary",

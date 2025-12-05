@@ -17,6 +17,9 @@ import { AlertTriangle } from "lucide-react";
 import { createMovementWallet, getMovementWallet } from "@/lib/privy-movement";
 import { useNetwork } from "@/contexts/NetworkContext";
 
+// Type extension for wallet adapter wallets with name/icon properties
+type WalletWithMeta = { name: string; icon?: string };
+
 interface WalletSelectionModalProps {
   children: React.ReactNode;
 }
@@ -35,7 +38,8 @@ export function WalletSelectionModal({ children }: WalletSelectionModalProps) {
   const movementWallet = getMovementWallet(user);
 
   // Filter and sort wallets - prioritize Nightly
-  const filteredWallets = wallets
+  // Cast wallets to include name/icon properties from the base Wallet interface
+  const filteredWallets = (wallets as unknown as WalletWithMeta[])
     .filter((wallet, index, self) => {
       // Remove duplicates based on wallet name
       return index === self.findIndex((w) => w.name === wallet.name);

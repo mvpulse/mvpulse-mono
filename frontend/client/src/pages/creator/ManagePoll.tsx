@@ -71,7 +71,7 @@ export default function ManagePoll() {
 
   // Modal states
   const [closePollModal, setClosePollModal] = useState(false);
-  const [selectedDistributionMode, setSelectedDistributionMode] = useState<number>(DISTRIBUTION_MODE.MANUAL_PULL);
+  const [selectedDistributionMode, setSelectedDistributionMode] = useState<number>(DISTRIBUTION_MODE.MANUAL_PULL as number);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const pollId = pollIdParam ? parseInt(pollIdParam, 10) : null;
