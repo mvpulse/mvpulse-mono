@@ -1,7 +1,7 @@
-import Joyride, { CallBackProps, STATUS, EVENTS, ACTIONS } from "react-joyride";
+import Joyride, { CallBackProps, STATUS, EVENTS, ACTIONS, Step } from "react-joyride";
 import { useTour } from "@/contexts/TourContext";
 import { getTourSteps } from "@/lib/tourSteps";
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 
 // Custom styles matching MVPulse theme
 const joyrideStyles = {
@@ -30,8 +30,10 @@ const joyrideStyles = {
   },
   buttonNext: {
     backgroundColor: "hsl(var(--primary))",
+    color: "#000000",
     borderRadius: "8px",
     fontSize: "14px",
+    fontWeight: 600,
     padding: "8px 16px",
   },
   buttonBack: {
@@ -87,6 +89,12 @@ export function GuidedTour() {
         }
       }
 
+      // Handle target not found - skip to next step
+      if (type === EVENTS.TARGET_NOT_FOUND) {
+        setStepIndex(index + 1);
+        return;
+      }
+
       // Handle close button
       if (action === ACTIONS.CLOSE) {
         stopTour();
@@ -95,11 +103,30 @@ export function GuidedTour() {
     [currentRole, markTourComplete, stopTour, setStepIndex]
   );
 
-  if (!isTourRunning || !currentRole) {
+  // Filter steps to only include those with existing DOM targets
+  const steps = useMemo(() => {
+    if (!currentRole) return [];
+
+    const allSteps = getTourSteps(currentRole);
+
+    // Filter out steps whose targets don't exist in the DOM
+    return allSteps.filter((step: Step) => {
+      // Center placement steps (welcome) don't need a specific target
+      if (step.placement === "center") return true;
+
+      // Check if target element exists
+      const target = step.target;
+      if (typeof target === "string") {
+        const element = document.querySelector(target);
+        return element !== null;
+      }
+      return true;
+    });
+  }, [currentRole, isTourRunning]); // Re-filter when tour starts
+
+  if (!isTourRunning || !currentRole || steps.length === 0) {
     return null;
   }
-
-  const steps = getTourSteps(currentRole);
 
   return (
     <Joyride
