@@ -1,6 +1,7 @@
 /**
  * Hook for fetching user activity events
  * Uses React Query for caching and automatic refetching
+ * Fetches data from Movement Indexer GraphQL API
  */
 
 import { useQuery } from "@tanstack/react-query";
@@ -14,7 +15,7 @@ export function useActivityEvents(address: string | undefined) {
     queryKey: ['activity', address, network],
     queryFn: () => {
       if (!address) return Promise.resolve([]);
-      return fetchUserActivity(config.rpcUrl, config.contractAddress, address, 10);
+      return fetchUserActivity(config.indexerUrl, config.contractAddress, address, 10);
     },
     enabled: !!address,
     staleTime: 30000, // 30 seconds

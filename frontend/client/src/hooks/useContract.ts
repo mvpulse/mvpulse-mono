@@ -4,11 +4,11 @@ import { useNetwork } from "@/contexts/NetworkContext";
 import { createAptosClient, getFunctionId, formatTimeRemaining, isPollActive } from "@/lib/contract";
 import { usePrivyWallet } from "@/hooks/usePrivyWallet";
 import { submitPrivyTransaction } from "@/lib/privy-transactions";
-import { getCoinTypeArg, CoinTypeId, COIN_TYPES } from "@/lib/tokens";
+import { CoinTypeId, COIN_TYPES } from "@/lib/tokens";
 import type { Poll, PollWithMeta, CreatePollInput, VoteInput, TransactionResult, PlatformConfig } from "@/types/poll";
 
 export function useContract() {
-  const { config, network } = useNetwork();
+  const { config } = useNetwork();
   const { signAndSubmitTransaction, account } = useWallet();
   const {
     isPrivyWallet,
@@ -94,10 +94,13 @@ export function useContract() {
 
       try {
         const coinTypeId = input.coinTypeId ?? COIN_TYPES.MOVE;
-        const coinTypeArg = getCoinTypeArg(coinTypeId as CoinTypeId, network);
+        // Use the correct function based on coin type
+        const functionName = coinTypeId === COIN_TYPES.PULSE
+          ? "create_poll_with_pulse"
+          : "create_poll_with_move";
 
         return await executeTransaction(
-          "create_poll",
+          functionName,
           [
             contractAddress, // registry_addr
             input.title,
@@ -107,10 +110,8 @@ export function useContract() {
             input.maxVoters.toString(),
             input.durationSecs.toString(),
             input.fundAmount.toString(),
-            coinTypeId.toString(), // coin_type_id
           ],
-          "Failed to create poll",
-          [coinTypeArg] // type argument
+          "Failed to create poll"
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to create poll";
@@ -120,7 +121,7 @@ export function useContract() {
         setLoading(false);
       }
     },
-    [executeTransaction, contractAddress, network]
+    [executeTransaction, contractAddress]
   );
 
   // Fund an existing poll
@@ -130,13 +131,14 @@ export function useContract() {
       setError(null);
 
       try {
-        const coinTypeArg = getCoinTypeArg(coinTypeId, network);
+        const functionName = coinTypeId === COIN_TYPES.PULSE
+          ? "fund_poll_with_pulse"
+          : "fund_poll_with_move";
 
         return await executeTransaction(
-          "fund_poll",
+          functionName,
           [contractAddress, pollId.toString(), amount.toString()],
-          "Failed to fund poll",
-          [coinTypeArg]
+          "Failed to fund poll"
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to fund poll";
@@ -146,7 +148,7 @@ export function useContract() {
         setLoading(false);
       }
     },
-    [executeTransaction, contractAddress, network]
+    [executeTransaction, contractAddress]
   );
 
   // Claim reward (for Manual Pull mode)
@@ -156,13 +158,14 @@ export function useContract() {
       setError(null);
 
       try {
-        const coinTypeArg = getCoinTypeArg(coinTypeId, network);
+        const functionName = coinTypeId === COIN_TYPES.PULSE
+          ? "claim_reward_pulse"
+          : "claim_reward_move";
 
         return await executeTransaction(
-          "claim_reward",
+          functionName,
           [contractAddress, pollId.toString()],
-          "Failed to claim reward",
-          [coinTypeArg]
+          "Failed to claim reward"
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to claim reward";
@@ -172,7 +175,7 @@ export function useContract() {
         setLoading(false);
       }
     },
-    [executeTransaction, contractAddress, network]
+    [executeTransaction, contractAddress]
   );
 
   // Distribute rewards to all voters (for Manual Push mode)
@@ -182,13 +185,14 @@ export function useContract() {
       setError(null);
 
       try {
-        const coinTypeArg = getCoinTypeArg(coinTypeId, network);
+        const functionName = coinTypeId === COIN_TYPES.PULSE
+          ? "distribute_rewards_pulse"
+          : "distribute_rewards_move";
 
         return await executeTransaction(
-          "distribute_rewards",
+          functionName,
           [contractAddress, pollId.toString()],
-          "Failed to distribute rewards",
-          [coinTypeArg]
+          "Failed to distribute rewards"
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to distribute rewards";
@@ -198,7 +202,7 @@ export function useContract() {
         setLoading(false);
       }
     },
-    [executeTransaction, contractAddress, network]
+    [executeTransaction, contractAddress]
   );
 
   // Withdraw remaining funds from a poll
@@ -208,13 +212,14 @@ export function useContract() {
       setError(null);
 
       try {
-        const coinTypeArg = getCoinTypeArg(coinTypeId, network);
+        const functionName = coinTypeId === COIN_TYPES.PULSE
+          ? "withdraw_remaining_pulse"
+          : "withdraw_remaining_move";
 
         return await executeTransaction(
-          "withdraw_remaining",
+          functionName,
           [contractAddress, pollId.toString()],
-          "Failed to withdraw funds",
-          [coinTypeArg]
+          "Failed to withdraw funds"
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to withdraw funds";
@@ -224,7 +229,7 @@ export function useContract() {
         setLoading(false);
       }
     },
-    [executeTransaction, contractAddress, network]
+    [executeTransaction, contractAddress]
   );
 
   // Vote on a poll

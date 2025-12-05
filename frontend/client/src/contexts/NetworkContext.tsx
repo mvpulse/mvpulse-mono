@@ -7,6 +7,7 @@ interface NetworkConfig {
   contractAddress: string;
   rpcUrl: string; // Proxy URL for regular fetch requests
   fullnodeUrl: string; // Actual RPC URL for Aptos SDK
+  indexerUrl: string; // GraphQL Indexer endpoint
   chainId: number;
   explorerUrl: string;
 }
@@ -23,6 +24,7 @@ const NETWORK_CONFIGS: Record<NetworkType, NetworkConfig> = {
     contractAddress: import.meta.env.VITE_TESTNET_CONTRACT_ADDRESS || "",
     rpcUrl: import.meta.env.VITE_TESTNET_RPC_URL || "https://testnet.movementnetwork.xyz/v1",
     fullnodeUrl: "https://testnet.movementnetwork.xyz/v1",
+    indexerUrl: "https://indexer.testnet.movementnetwork.xyz/v1/graphql",
     chainId: Number(import.meta.env.VITE_TESTNET_CHAIN_ID) || 250,
     explorerUrl: "https://explorer.movementnetwork.xyz",
   },
@@ -31,6 +33,7 @@ const NETWORK_CONFIGS: Record<NetworkType, NetworkConfig> = {
     contractAddress: import.meta.env.VITE_MAINNET_CONTRACT_ADDRESS || "",
     rpcUrl: import.meta.env.VITE_MAINNET_RPC_URL || "https://full.mainnet.movementinfra.xyz/v1",
     fullnodeUrl: "https://full.mainnet.movementinfra.xyz/v1",
+    indexerUrl: "https://indexer.mainnet.movementnetwork.xyz/v1/graphql",
     chainId: Number(import.meta.env.VITE_MAINNET_CHAIN_ID) || 126,
     explorerUrl: "https://explorer.movementnetwork.xyz",
   },

@@ -1,13 +1,13 @@
 /// Swap module for PULSE/Stablecoin AMM trading
 /// Both PULSE and stablecoin (USDC.e) use Fungible Asset standard
 /// Implements constant product (x*y=k) automated market maker
-module contracts::swap {
+module swap::swap {
     use std::signer;
     use aptos_framework::event;
-    use aptos_framework::object::{Self, Object};
+    use aptos_framework::object::{Self, Object, ExtendRef};
     use aptos_framework::fungible_asset::{Self, Metadata, FungibleStore};
     use aptos_framework::primary_fungible_store;
-    use contracts::pulse;
+    use pulse::pulse;
 
     /// Error codes
     const E_NOT_ADMIN: u64 = 1;
@@ -33,8 +33,10 @@ module contracts::swap {
     /// Liquidity Pool state for PULSE FA / Stablecoin FA
     struct LiquidityPool has key {
         pulse_store: Object<FungibleStore>,    // FA store for PULSE
+        pulse_store_extend_ref: ExtendRef,     // ExtendRef to generate signer for PULSE store
         pulse_metadata: Object<Metadata>,       // PULSE metadata
         stable_store: Object<FungibleStore>,   // FA store for stablecoin
+        stable_store_extend_ref: ExtendRef,    // ExtendRef to generate signer for stable store
         stable_metadata: Object<Metadata>,      // Stablecoin metadata (USDC.e)
         total_lp_shares: u64,
         fee_bps: u64,
@@ -98,8 +100,8 @@ module contracts::swap {
         fee_bps: u64
     ) {
         let admin = signer::address_of(account);
-        assert!(admin == @contracts, E_NOT_ADMIN);
-        assert!(!exists<LiquidityPool>(@contracts), E_ALREADY_INITIALIZED);
+        assert!(admin == @swap, E_NOT_ADMIN);
+        assert!(!exists<LiquidityPool>(@swap), E_ALREADY_INITIALIZED);
         assert!(fee_bps <= MAX_FEE_BPS, E_INVALID_FEE);
 
         // Get PULSE metadata from the pulse module
@@ -109,17 +111,21 @@ module contracts::swap {
         // Get the stablecoin FA metadata object
         let stable_metadata = object::address_to_object<Metadata>(stable_metadata_addr);
 
-        // Create fungible stores for both tokens
+        // Create fungible stores for both tokens with ExtendRef for withdrawals
         let pulse_constructor_ref = object::create_object(admin);
         let pulse_store = fungible_asset::create_store(&pulse_constructor_ref, pulse_metadata);
+        let pulse_store_extend_ref = object::generate_extend_ref(&pulse_constructor_ref);
 
         let stable_constructor_ref = object::create_object(admin);
         let stable_store = fungible_asset::create_store(&stable_constructor_ref, stable_metadata);
+        let stable_store_extend_ref = object::generate_extend_ref(&stable_constructor_ref);
 
         let pool = LiquidityPool {
             pulse_store,
+            pulse_store_extend_ref,
             pulse_metadata,
             stable_store,
+            stable_store_extend_ref,
             stable_metadata,
             total_lp_shares: 0,
             fee_bps,
@@ -142,7 +148,7 @@ module contracts::swap {
         new_fee_bps: u64
     ) acquires LiquidityPool {
         let caller = signer::address_of(account);
-        let pool = borrow_global_mut<LiquidityPool>(@contracts);
+        let pool = borrow_global_mut<LiquidityPool>(@swap);
 
         assert!(caller == pool.admin, E_NOT_ADMIN);
         assert!(new_fee_bps <= MAX_FEE_BPS, E_INVALID_FEE);
@@ -159,7 +165,7 @@ module contracts::swap {
         new_admin: address
     ) acquires LiquidityPool {
         let caller = signer::address_of(account);
-        let pool = borrow_global_mut<LiquidityPool>(@contracts);
+        let pool = borrow_global_mut<LiquidityPool>(@swap);
 
         assert!(caller == pool.admin, E_NOT_ADMIN);
         pool.admin = new_admin;
@@ -175,7 +181,7 @@ module contracts::swap {
         min_lp_shares: u64
     ) acquires LiquidityPool, LPPosition {
         let provider = signer::address_of(account);
-        let pool = borrow_global_mut<LiquidityPool>(@contracts);
+        let pool = borrow_global_mut<LiquidityPool>(@swap);
 
         let pulse_reserve = fungible_asset::balance(pool.pulse_store);
         let stable_reserve = fungible_asset::balance(pool.stable_store);
@@ -241,7 +247,7 @@ module contracts::swap {
         let position = borrow_global_mut<LPPosition>(provider);
         assert!(position.shares >= lp_shares, E_INSUFFICIENT_LP_BALANCE);
 
-        let pool = borrow_global_mut<LiquidityPool>(@contracts);
+        let pool = borrow_global_mut<LiquidityPool>(@swap);
 
         let pulse_reserve = fungible_asset::balance(pool.pulse_store);
         let stable_reserve = fungible_asset::balance(pool.stable_store);
@@ -257,12 +263,16 @@ module contracts::swap {
         position.shares = position.shares - lp_shares;
         pool.total_lp_shares = pool.total_lp_shares - lp_shares;
 
-        // Transfer PULSE (FA) to provider
-        let pulse_fa = fungible_asset::withdraw(account, pool.pulse_store, pulse_out);
+        // Generate signers for pool stores using ExtendRef
+        let pulse_store_signer = object::generate_signer_for_extending(&pool.pulse_store_extend_ref);
+        let stable_store_signer = object::generate_signer_for_extending(&pool.stable_store_extend_ref);
+
+        // Transfer PULSE (FA) to provider using pool store's signer
+        let pulse_fa = fungible_asset::withdraw(&pulse_store_signer, pool.pulse_store, pulse_out);
         primary_fungible_store::deposit(provider, pulse_fa);
 
-        // Transfer stablecoin (FA) to provider
-        let stable_fa = fungible_asset::withdraw(account, pool.stable_store, stable_out);
+        // Transfer stablecoin (FA) to provider using pool store's signer
+        let stable_fa = fungible_asset::withdraw(&stable_store_signer, pool.stable_store, stable_out);
         primary_fungible_store::deposit(provider, stable_fa);
 
         event::emit(LiquidityRemoved {
@@ -282,7 +292,7 @@ module contracts::swap {
         min_stable_out: u64
     ) acquires LiquidityPool {
         let trader = signer::address_of(account);
-        let pool = borrow_global_mut<LiquidityPool>(@contracts);
+        let pool = borrow_global_mut<LiquidityPool>(@swap);
 
         let pulse_reserve = fungible_asset::balance(pool.pulse_store);
         let stable_reserve = fungible_asset::balance(pool.stable_store);
@@ -310,12 +320,15 @@ module contracts::swap {
             E_K_INVARIANT_VIOLATED
         );
 
-        // Execute swap - PULSE in (FA)
+        // Execute swap - PULSE in (FA) from user
         let pulse_in = primary_fungible_store::withdraw(account, pool.pulse_metadata, pulse_amount_in);
         fungible_asset::deposit(pool.pulse_store, pulse_in);
 
-        // Stablecoin out (FA)
-        let stable_out_fa = fungible_asset::withdraw(account, pool.stable_store, stable_out);
+        // Generate signer for pool's stable store using ExtendRef
+        let stable_store_signer = object::generate_signer_for_extending(&pool.stable_store_extend_ref);
+
+        // Stablecoin out (FA) from pool to user
+        let stable_out_fa = fungible_asset::withdraw(&stable_store_signer, pool.stable_store, stable_out);
         primary_fungible_store::deposit(trader, stable_out_fa);
 
         event::emit(Swap {
@@ -335,7 +348,7 @@ module contracts::swap {
         min_pulse_out: u64
     ) acquires LiquidityPool {
         let trader = signer::address_of(account);
-        let pool = borrow_global_mut<LiquidityPool>(@contracts);
+        let pool = borrow_global_mut<LiquidityPool>(@swap);
 
         let pulse_reserve = fungible_asset::balance(pool.pulse_store);
         let stable_reserve = fungible_asset::balance(pool.stable_store);
@@ -363,12 +376,15 @@ module contracts::swap {
             E_K_INVARIANT_VIOLATED
         );
 
-        // Execute swap - Stablecoin in (FA)
+        // Execute swap - Stablecoin in (FA) from user
         let stable_in = primary_fungible_store::withdraw(account, pool.stable_metadata, stable_amount_in);
         fungible_asset::deposit(pool.stable_store, stable_in);
 
-        // PULSE out (FA)
-        let pulse_out_fa = fungible_asset::withdraw(account, pool.pulse_store, pulse_out);
+        // Generate signer for pool's PULSE store using ExtendRef
+        let pulse_store_signer = object::generate_signer_for_extending(&pool.pulse_store_extend_ref);
+
+        // PULSE out (FA) from pool to user
+        let pulse_out_fa = fungible_asset::withdraw(&pulse_store_signer, pool.pulse_store, pulse_out);
         primary_fungible_store::deposit(trader, pulse_out_fa);
 
         event::emit(Swap {
@@ -386,20 +402,20 @@ module contracts::swap {
     #[view]
     /// Get pool reserves
     public fun get_reserves(): (u64, u64) acquires LiquidityPool {
-        if (!exists<LiquidityPool>(@contracts)) {
+        if (!exists<LiquidityPool>(@swap)) {
             return (0, 0)
         };
-        let pool = borrow_global<LiquidityPool>(@contracts);
+        let pool = borrow_global<LiquidityPool>(@swap);
         (fungible_asset::balance(pool.pulse_store), fungible_asset::balance(pool.stable_store))
     }
 
     #[view]
     /// Get pool info (reserves, total shares, fee)
     public fun get_pool_info(): (u64, u64, u64, u64) acquires LiquidityPool {
-        if (!exists<LiquidityPool>(@contracts)) {
+        if (!exists<LiquidityPool>(@swap)) {
             return (0, 0, 0, 0)
         };
-        let pool = borrow_global<LiquidityPool>(@contracts);
+        let pool = borrow_global<LiquidityPool>(@swap);
         (
             fungible_asset::balance(pool.pulse_store),
             fungible_asset::balance(pool.stable_store),
@@ -424,10 +440,10 @@ module contracts::swap {
         amount_in: u64,
         is_pulse_to_stable: bool
     ): u64 acquires LiquidityPool {
-        if (!exists<LiquidityPool>(@contracts)) {
+        if (!exists<LiquidityPool>(@swap)) {
             return 0
         };
-        let pool = borrow_global<LiquidityPool>(@contracts);
+        let pool = borrow_global<LiquidityPool>(@swap);
         let pulse_reserve = fungible_asset::balance(pool.pulse_store);
         let stable_reserve = fungible_asset::balance(pool.stable_store);
 
@@ -454,10 +470,10 @@ module contracts::swap {
         amount_in: u64,
         is_pulse_to_stable: bool
     ): u64 acquires LiquidityPool {
-        if (!exists<LiquidityPool>(@contracts)) {
+        if (!exists<LiquidityPool>(@swap)) {
             return 0
         };
-        let pool = borrow_global<LiquidityPool>(@contracts);
+        let pool = borrow_global<LiquidityPool>(@swap);
         let pulse_reserve = fungible_asset::balance(pool.pulse_store);
         let stable_reserve = fungible_asset::balance(pool.stable_store);
 
@@ -492,10 +508,10 @@ module contracts::swap {
     #[view]
     /// Get current spot price (PULSE per Stablecoin, scaled by 1e8)
     public fun get_spot_price(): u64 acquires LiquidityPool {
-        if (!exists<LiquidityPool>(@contracts)) {
+        if (!exists<LiquidityPool>(@swap)) {
             return 0
         };
-        let pool = borrow_global<LiquidityPool>(@contracts);
+        let pool = borrow_global<LiquidityPool>(@swap);
         let pulse_reserve = fungible_asset::balance(pool.pulse_store);
         let stable_reserve = fungible_asset::balance(pool.stable_store);
 
@@ -510,26 +526,26 @@ module contracts::swap {
     #[view]
     /// Check if pool is initialized
     public fun is_initialized(): bool {
-        exists<LiquidityPool>(@contracts)
+        exists<LiquidityPool>(@swap)
     }
 
     #[view]
     /// Get stable metadata address
     public fun get_stable_metadata(): address acquires LiquidityPool {
-        if (!exists<LiquidityPool>(@contracts)) {
+        if (!exists<LiquidityPool>(@swap)) {
             return @0x0
         };
-        let pool = borrow_global<LiquidityPool>(@contracts);
+        let pool = borrow_global<LiquidityPool>(@swap);
         object::object_address(&pool.stable_metadata)
     }
 
     #[view]
     /// Get pulse metadata address
     public fun get_pulse_metadata(): address acquires LiquidityPool {
-        if (!exists<LiquidityPool>(@contracts)) {
+        if (!exists<LiquidityPool>(@swap)) {
             return @0x0
         };
-        let pool = borrow_global<LiquidityPool>(@contracts);
+        let pool = borrow_global<LiquidityPool>(@swap);
         object::object_address(&pool.pulse_metadata)
     }
 

@@ -1,10 +1,11 @@
 [package]
-name = "contracts"
+name = "poll"
 version = "1.0.0"
 authors = []
 
 [addresses]
-contracts = "0x25a289ce0548eddf0d05dca45464d5eafc934a8a4f13a2b133bf723d7b8559eb"
+poll = "0x306980d338caa4537e109afdc15f7f749b5948c9e69ec0178a7527363cdca70e"
+pulse = "0x69c7c6752b3426e00fec646270e5b7e9f0efa18bddbd7f112a8e84f7fbe3f737"
 
 [dev-addresses]
 
@@ -12,5 +13,8 @@ contracts = "0x25a289ce0548eddf0d05dca45464d5eafc934a8a4f13a2b133bf723d7b8559eb"
 git = "https://github.com/movementlabsxyz/aptos-core.git"
 rev = "e85553104911152d800fa2c32f7ef0d80daf60b9"
 subdir = "aptos-move/framework/aptos-framework"
+
+[dependencies.pulse]
+local = "../pulse"
 
 [dev-dependencies]

@@ -263,8 +263,9 @@ export function useSwap() {
   );
 
   // Get spot price (view function)
+  // Returns PULSE per Stablecoin (how many PULSE you get for 1 USDC)
   const getSpotPrice = useCallback(
-    async (isPulsePerUsdc: boolean = true): Promise<number | null> => {
+    async (): Promise<number | null> => {
       if (!swapAddress) return null;
 
       try {
@@ -272,7 +273,7 @@ export function useSwap() {
           payload: {
             function: getSwapFunctionId("get_spot_price"),
             typeArguments: [],
-            functionArguments: [isPulsePerUsdc],
+            functionArguments: [],
           },
         });
 

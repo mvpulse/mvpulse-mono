@@ -1,7 +1,7 @@
 /// Poll module for MovePoll dApp
 /// Allows creating polls, voting, and distributing rewards
 /// Supports MOVE (legacy coin) and PULSE (Fungible Asset)
-module contracts::poll {
+module poll::poll {
     use std::string::String;
     use std::vector;
     use std::signer;
@@ -9,10 +9,10 @@ module contracts::poll {
     use aptos_framework::event;
     use aptos_framework::coin;
     use aptos_framework::aptos_coin::AptosCoin;
-    use aptos_framework::object::{Self, Object};
+    use aptos_framework::object::{Self, Object, ExtendRef};
     use aptos_framework::fungible_asset::{Self, Metadata, FungibleStore};
     use aptos_framework::primary_fungible_store;
-    use contracts::pulse;
+    use pulse::pulse;
 
     /// Error codes
     const E_NOT_OWNER: u64 = 1;
@@ -92,6 +92,7 @@ module contracts::poll {
     struct FARewardVault has key {
         pulse_store: Object<FungibleStore>,
         pulse_metadata: Object<Metadata>,
+        extend_ref: ExtendRef,  // For generating signer to manage the store
     }
 
     #[event]
@@ -163,11 +164,13 @@ module contracts::poll {
         // Initialize the FA reward vault for PULSE
         let pulse_metadata = pulse::get_metadata();
         let constructor_ref = object::create_object(admin_addr);
+        let extend_ref = object::generate_extend_ref(&constructor_ref);
         let pulse_store = fungible_asset::create_store(&constructor_ref, pulse_metadata);
 
         let fa_vault = FARewardVault {
             pulse_store,
             pulse_metadata,
+            extend_ref,
         };
         move_to(account, fa_vault);
     }
@@ -640,7 +643,9 @@ module contracts::poll {
 
         if (reward_amount > 0) {
             let fa_vault = borrow_global<FARewardVault>(registry_addr);
-            let reward_fa = fungible_asset::withdraw(account, fa_vault.pulse_store, reward_amount);
+            // Use extend_ref to generate signer for withdrawal
+            let vault_signer = object::generate_signer_for_extending(&fa_vault.extend_ref);
+            let reward_fa = fungible_asset::withdraw(&vault_signer, fa_vault.pulse_store, reward_amount);
             primary_fungible_store::deposit(claimer, reward_fa);
             poll.reward_pool = poll.reward_pool - reward_amount;
         };
@@ -744,6 +749,8 @@ module contracts::poll {
             };
 
             let fa_vault = borrow_global<FARewardVault>(registry_addr);
+            // Use extend_ref to generate signer for withdrawal
+            let vault_signer = object::generate_signer_for_extending(&fa_vault.extend_ref);
 
             let i = 0;
             while (i < voter_count) {
@@ -756,7 +763,7 @@ module contracts::poll {
 
                 let vault_balance = fungible_asset::balance(fa_vault.pulse_store);
                 if (actual_reward > 0 && actual_reward <= vault_balance) {
-                    let reward_fa = fungible_asset::withdraw(account, fa_vault.pulse_store, actual_reward);
+                    let reward_fa = fungible_asset::withdraw(&vault_signer, fa_vault.pulse_store, actual_reward);
                     primary_fungible_store::deposit(voter, reward_fa);
                     poll.reward_pool = poll.reward_pool - actual_reward;
                     total_distributed = total_distributed + actual_reward;
@@ -819,7 +826,9 @@ module contracts::poll {
         let remaining = poll.reward_pool;
         if (remaining > 0) {
             let fa_vault = borrow_global<FARewardVault>(registry_addr);
-            let fa = fungible_asset::withdraw(account, fa_vault.pulse_store, remaining);
+            // Use extend_ref to generate signer for withdrawal
+            let vault_signer = object::generate_signer_for_extending(&fa_vault.extend_ref);
+            let fa = fungible_asset::withdraw(&vault_signer, fa_vault.pulse_store, remaining);
             primary_fungible_store::deposit(caller, fa);
             poll.reward_pool = 0;
         };

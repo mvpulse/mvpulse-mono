@@ -1,0 +1,20 @@
+[package]
+name = "swap"
+version = "1.0.0"
+authors = []
+
+[addresses]
+swap = "0x55872704413ffc43bb832df7eb14c0665c9ae401897077a262d56e2de37d2b7e"
+pulse = "0x69c7c6752b3426e00fec646270e5b7e9f0efa18bddbd7f112a8e84f7fbe3f737"
+
+[dev-addresses]
+
+[dependencies.AptosFramework]
+git = "https://github.com/movementlabsxyz/aptos-core.git"
+rev = "e85553104911152d800fa2c32f7ef0d80daf60b9"
+subdir = "aptos-move/framework/aptos-framework"
+
+[dependencies.pulse]
+local = "../pulse"
+
+[dev-dependencies]

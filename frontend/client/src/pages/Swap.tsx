@@ -79,7 +79,7 @@ export default function SwapPage() {
         address ? getAllBalances(address, config.rpcUrl, network, config.fullnodeUrl) : null,
         getPoolInfo(),
         address ? getLpPosition() : null,
-        getSpotPrice(true), // PULSE per USDC
+        getSpotPrice(), // PULSE per USDC
       ]);
 
       setBalances(balanceData);

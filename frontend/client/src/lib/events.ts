@@ -1,11 +1,11 @@
 /**
  * Event fetching utilities for MVPulse
- * Fetches on-chain events for user activity display
+ * Uses Movement Indexer GraphQL API to fetch user activity
  */
 
 export interface ActivityEvent {
   type: 'vote' | 'reward_claimed' | 'poll_created';
-  pollId: number;
+  pollId?: number;
   pollTitle?: string;
   amount?: number;
   timestamp: number;
@@ -13,237 +13,104 @@ export interface ActivityEvent {
   optionIndex?: number;
 }
 
-interface RawEvent {
+interface UserTransaction {
   version: string;
-  guid: {
-    creation_number: string;
-    account_address: string;
-  };
-  sequence_number: string;
-  type: string;
-  data: Record<string, unknown>;
+  entry_function_function_name: string | null;
+  timestamp: string;
 }
 
-/**
- * Fetch events from the blockchain for a specific event type
- */
-async function fetchEvents(
-  rpcUrl: string,
-  contractAddress: string,
-  eventType: string,
-  limit: number = 25
-): Promise<RawEvent[]> {
-  try {
-    // Use the events API endpoint to fetch events by type
-    const response = await fetch(
-      `${rpcUrl}/accounts/${contractAddress}/events/${eventType}?limit=${limit}`
-    );
+interface GraphQLResponse {
+  data?: {
+    user_transactions: UserTransaction[];
+  };
+  errors?: Array<{ message: string }>;
+}
 
-    if (!response.ok) {
-      if (response.status === 404) {
-        // No events found
-        return [];
-      }
-      throw new Error(`Failed to fetch events: ${response.statusText}`);
+// GraphQL query for user transactions with the poll contract
+const ACTIVITY_QUERY = `
+  query GetUserActivity($sender: String!, $contractAddress: String!, $limit: Int!) {
+    user_transactions(
+      where: {
+        sender: { _eq: $sender },
+        entry_function_contract_address: { _eq: $contractAddress },
+        entry_function_module_name: { _eq: "poll" }
+      },
+      order_by: { timestamp: desc },
+      limit: $limit
+    ) {
+      version
+      entry_function_function_name
+      timestamp
     }
+  }
+`;
 
-    return await response.json();
-  } catch (error) {
-    console.error(`Error fetching ${eventType} events:`, error);
-    return [];
+/**
+ * Map function name to activity type
+ */
+function mapFunctionToActivityType(functionName: string | null): ActivityEvent['type'] {
+  switch (functionName) {
+    case 'vote':
+      return 'vote';
+    case 'claim_reward':
+      return 'reward_claimed';
+    case 'create_poll':
+      return 'poll_created';
+    default:
+      return 'vote';
   }
 }
 
 /**
- * Fetch module events using the indexed events API
- * This queries events emitted by the contract
+ * Fetch user activity from the Movement Indexer
+ * @param indexerUrl - The GraphQL Indexer endpoint URL
+ * @param contractAddress - The poll contract address
+ * @param userAddress - The user's wallet address
+ * @param limit - Maximum number of activities to fetch
  */
-async function fetchModuleEvents(
-  rpcUrl: string,
+export async function fetchUserActivity(
+  indexerUrl: string,
   contractAddress: string,
-  moduleName: string,
-  eventName: string,
-  limit: number = 25
-): Promise<RawEvent[]> {
+  userAddress: string,
+  limit: number = 10
+): Promise<ActivityEvent[]> {
   try {
-    // Query events by type using the events endpoint
-    const eventType = `${contractAddress}::${moduleName}::${eventName}`;
-    const response = await fetch(
-      `${rpcUrl}/events/by_event_type/${encodeURIComponent(eventType)}?limit=${limit}`
-    );
+    const response = await fetch(indexerUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: ACTIVITY_QUERY,
+        variables: {
+          sender: userAddress,
+          contractAddress: contractAddress,
+          limit: limit,
+        },
+      }),
+    });
 
     if (!response.ok) {
-      // Fall back to account events if the indexed endpoint doesn't work
+      console.error(`Indexer request failed: ${response.status} ${response.statusText}`);
       return [];
     }
 
-    return await response.json();
-  } catch (error) {
-    console.error(`Error fetching ${eventName} events:`, error);
-    return [];
-  }
-}
+    const result: GraphQLResponse = await response.json();
 
-/**
- * Get transaction timestamp from transaction hash
- */
-async function getTransactionTimestamp(
-  rpcUrl: string,
-  txHash: string
-): Promise<number> {
-  try {
-    const response = await fetch(`${rpcUrl}/transactions/by_hash/${txHash}`);
-    if (!response.ok) {
-      return Date.now();
+    if (result.errors) {
+      console.error("GraphQL errors:", result.errors);
+      return [];
     }
-    const tx = await response.json();
-    return Math.floor(Number(tx.timestamp) / 1000); // Convert from microseconds to seconds
-  } catch {
-    return Date.now();
-  }
-}
 
-/**
- * Fetch user's vote events
- */
-async function fetchUserVotes(
-  rpcUrl: string,
-  contractAddress: string,
-  userAddress: string,
-  limit: number = 10
-): Promise<ActivityEvent[]> {
-  try {
-    // Try to fetch VoteCast events
-    const events = await fetchModuleEvents(rpcUrl, contractAddress, 'poll', 'VoteCast', limit * 2);
+    if (!result.data?.user_transactions) {
+      return [];
+    }
 
-    // Filter events for this user and map to ActivityEvent
-    const userEvents = events
-      .filter((event) => {
-        const data = event.data as { voter?: string };
-        return data.voter === userAddress;
-      })
-      .slice(0, limit)
-      .map((event): ActivityEvent => {
-        const data = event.data as { poll_id?: string; voter?: string; option_index?: string };
-        return {
-          type: 'vote',
-          pollId: parseInt(data.poll_id || '0', 10),
-          optionIndex: parseInt(data.option_index || '0', 10),
-          timestamp: Date.now(), // Will be updated if we can get transaction info
-          txHash: event.version,
-        };
-      });
-
-    return userEvents;
+    return result.data.user_transactions.map((tx): ActivityEvent => ({
+      type: mapFunctionToActivityType(tx.entry_function_function_name),
+      timestamp: new Date(tx.timestamp).getTime(),
+      txHash: tx.version,
+    }));
   } catch (error) {
-    console.error('Error fetching user votes:', error);
-    return [];
-  }
-}
-
-/**
- * Fetch user's reward claim events
- */
-async function fetchUserRewards(
-  rpcUrl: string,
-  contractAddress: string,
-  userAddress: string,
-  limit: number = 10
-): Promise<ActivityEvent[]> {
-  try {
-    // Try to fetch RewardClaimed events
-    const events = await fetchModuleEvents(rpcUrl, contractAddress, 'poll', 'RewardClaimed', limit * 2);
-
-    // Filter events for this user and map to ActivityEvent
-    const userEvents = events
-      .filter((event) => {
-        const data = event.data as { claimer?: string };
-        return data.claimer === userAddress;
-      })
-      .slice(0, limit)
-      .map((event): ActivityEvent => {
-        const data = event.data as { poll_id?: string; claimer?: string; amount?: string };
-        return {
-          type: 'reward_claimed',
-          pollId: parseInt(data.poll_id || '0', 10),
-          amount: parseInt(data.amount || '0', 10),
-          timestamp: Date.now(),
-          txHash: event.version,
-        };
-      });
-
-    return userEvents;
-  } catch (error) {
-    console.error('Error fetching user rewards:', error);
-    return [];
-  }
-}
-
-/**
- * Fetch user's created polls
- */
-async function fetchUserPolls(
-  rpcUrl: string,
-  contractAddress: string,
-  userAddress: string,
-  limit: number = 10
-): Promise<ActivityEvent[]> {
-  try {
-    // Try to fetch PollCreated events
-    const events = await fetchModuleEvents(rpcUrl, contractAddress, 'poll', 'PollCreated', limit * 2);
-
-    // Filter events for this user and map to ActivityEvent
-    const userEvents = events
-      .filter((event) => {
-        const data = event.data as { creator?: string };
-        return data.creator === userAddress;
-      })
-      .slice(0, limit)
-      .map((event): ActivityEvent => {
-        const data = event.data as { poll_id?: string; creator?: string };
-        return {
-          type: 'poll_created',
-          pollId: parseInt(data.poll_id || '0', 10),
-          timestamp: Date.now(),
-          txHash: event.version,
-        };
-      });
-
-    return userEvents;
-  } catch (error) {
-    console.error('Error fetching user polls:', error);
-    return [];
-  }
-}
-
-/**
- * Fetch all user activity (votes, rewards, poll creations)
- * Merges and sorts by timestamp descending
- */
-export async function fetchUserActivity(
-  rpcUrl: string,
-  contractAddress: string,
-  userAddress: string,
-  limit: number = 10
-): Promise<ActivityEvent[]> {
-  try {
-    // Fetch all event types in parallel
-    const [votes, rewards, polls] = await Promise.all([
-      fetchUserVotes(rpcUrl, contractAddress, userAddress, limit),
-      fetchUserRewards(rpcUrl, contractAddress, userAddress, limit),
-      fetchUserPolls(rpcUrl, contractAddress, userAddress, limit),
-    ]);
-
-    // Merge all events
-    const allEvents = [...votes, ...rewards, ...polls];
-
-    // Sort by timestamp descending (most recent first)
-    allEvents.sort((a, b) => b.timestamp - a.timestamp);
-
-    // Return limited results
-    return allEvents.slice(0, limit);
-  } catch (error) {
-    console.error('Error fetching user activity:', error);
+    console.error("Error fetching user activity from indexer:", error);
     return [];
   }
 }
