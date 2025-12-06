@@ -19,11 +19,14 @@ import CreatorDashboard from "@/pages/creator/CreatorDashboard";
 import ManagePolls from "@/pages/creator/ManagePolls";
 import ManagePoll from "@/pages/creator/ManagePoll";
 import Distributions from "@/pages/creator/Distributions";
+import QuestManager from "@/pages/creator/QuestManager";
 
 // Participant pages
 import ParticipantDashboard from "@/pages/participant/ParticipantDashboard";
 import VotingHistory from "@/pages/participant/VotingHistory";
 import Rewards from "@/pages/participant/Rewards";
+import Quests from "@/pages/participant/Quests";
+import Leaderboard from "@/pages/Leaderboard";
 
 function App() {
   return (
@@ -45,11 +48,14 @@ function App() {
             <Route path="/creator/manage/:pollId" component={ManagePoll} />
             <Route path="/creator/manage" component={ManagePolls} />
             <Route path="/creator/distributions" component={Distributions} />
+            <Route path="/creator/quests" component={QuestManager} />
 
             {/* Participant routes */}
             <Route path="/participant" component={ParticipantDashboard} />
+            <Route path="/participant/quests" component={Quests} />
             <Route path="/participant/history" component={VotingHistory} />
             <Route path="/participant/rewards" component={Rewards} />
+            <Route path="/leaderboard" component={Leaderboard} />
 
             <Route component={NotFound} />
           </Switch>

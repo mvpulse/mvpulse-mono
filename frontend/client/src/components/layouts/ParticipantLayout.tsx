@@ -1,5 +1,5 @@
 import { ReactNode, useEffect } from "react";
-import { LayoutDashboard, History, Gift, Compass, Settings, HelpCircle } from "lucide-react";
+import { LayoutDashboard, History, Gift, Compass, Settings, HelpCircle, ListChecks, Trophy } from "lucide-react";
 import { DashboardSidebar, type SidebarSection } from "@/components/DashboardSidebar";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { useTour } from "@/contexts/TourContext";
@@ -30,6 +30,8 @@ export function ParticipantLayout({ children, title, description }: ParticipantL
       title: "Participant",
       items: [
         { label: "Dashboard", icon: LayoutDashboard, href: "/participant" },
+        { label: "Quests", icon: ListChecks, href: "/participant/quests", dataTour: "sidebar-quests" },
+        { label: "Leaderboard", icon: Trophy, href: "/leaderboard", dataTour: "sidebar-leaderboard" },
         { label: "Voting History", icon: History, href: "/participant/history", dataTour: "sidebar-voting-history" },
         { label: "Rewards", icon: Gift, href: "/participant/rewards", dataTour: "sidebar-rewards" },
       ],
