@@ -177,14 +177,26 @@ interface CreateQuestForm {
   targetAction: string;
 }
 
+interface CreateSeasonForm {
+  name: string;
+  description: string;
+  durationDays: number;
+}
+
 export default function QuestManager() {
   const { isConnected, address } = useWalletConnection();
-  const { season, isLoading: isSeasonLoading } = useSeason();
+  const { season, isLoading: isSeasonLoading, refetch: refetchSeason } = useSeason();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isCreateSeasonDialogOpen, setIsCreateSeasonDialogOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<QuestTemplate | null>(null);
+  const [seasonForm, setSeasonForm] = useState<CreateSeasonForm>({
+    name: "Season 1",
+    description: "The first season of quests and rewards",
+    durationDays: 30,
+  });
   const [customForm, setCustomForm] = useState<CreateQuestForm>({
     name: "",
     description: "",
@@ -246,6 +258,57 @@ export default function QuestManager() {
       });
     },
   });
+
+  // Create season mutation
+  const createSeasonMutation = useMutation({
+    mutationFn: async (seasonData: CreateSeasonForm) => {
+      if (!address) throw new Error("No wallet connected");
+
+      const now = new Date();
+      const endTime = new Date(now.getTime() + seasonData.durationDays * 24 * 60 * 60 * 1000);
+
+      const res = await apiRequest("POST", "/api/seasons", {
+        name: seasonData.name,
+        description: seasonData.description,
+        startTime: now.toISOString(),
+        endTime: endTime.toISOString(),
+        creatorAddress: address,
+      });
+      return res.json();
+    },
+    onSuccess: async (data) => {
+      // Activate the season immediately
+      if (data.data?.id) {
+        await apiRequest("PATCH", `/api/seasons/${data.data.id}/status`, { status: 1 });
+      }
+      queryClient.invalidateQueries({ queryKey: ["currentSeason"] });
+      refetchSeason();
+      setIsCreateSeasonDialogOpen(false);
+      toast({
+        title: "Season Created",
+        description: "Your season has been created and activated. You can now create quests!",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create season",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleCreateSeason = () => {
+    if (!seasonForm.name || seasonForm.durationDays < 1) {
+      toast({
+        title: "Validation Error",
+        description: "Please provide a season name and valid duration",
+        variant: "destructive",
+      });
+      return;
+    }
+    createSeasonMutation.mutate(seasonForm);
+  };
 
   const handleTemplateSelect = (template: QuestTemplate) => {
     setSelectedTemplate(template);
@@ -313,9 +376,85 @@ export default function QuestManager() {
           <CardContent className="flex flex-col items-center justify-center py-12">
             <Calendar className="h-12 w-12 text-muted-foreground mb-4" />
             <p className="text-lg font-medium">No Active Season</p>
-            <p className="text-muted-foreground text-sm mt-1">
-              Quests can only be created during an active season
+            <p className="text-muted-foreground text-sm mt-1 text-center max-w-md">
+              Quests are tied to seasons. Create a season to start adding quests for your community.
             </p>
+            <Dialog open={isCreateSeasonDialogOpen} onOpenChange={setIsCreateSeasonDialogOpen}>
+              <DialogTrigger asChild>
+                <Button className="mt-6">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Create Season
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Create New Season</DialogTitle>
+                  <DialogDescription>
+                    Start a new season to enable quests and track participant progress
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-4 mt-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="seasonName">Season Name</Label>
+                    <Input
+                      id="seasonName"
+                      placeholder="e.g., Season 1 - Launch"
+                      value={seasonForm.name}
+                      onChange={(e) => setSeasonForm({ ...seasonForm, name: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="seasonDescription">Description (optional)</Label>
+                    <Textarea
+                      id="seasonDescription"
+                      placeholder="Describe this season..."
+                      value={seasonForm.description}
+                      onChange={(e) => setSeasonForm({ ...seasonForm, description: e.target.value })}
+                      rows={2}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="durationDays">Duration (days)</Label>
+                    <Input
+                      id="durationDays"
+                      type="number"
+                      min={1}
+                      max={365}
+                      value={seasonForm.durationDays}
+                      onChange={(e) => setSeasonForm({ ...seasonForm, durationDays: Number(e.target.value) })}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Season will start immediately and run for {seasonForm.durationDays} days
+                    </p>
+                  </div>
+                </div>
+
+                <DialogFooter className="mt-6">
+                  <Button variant="outline" onClick={() => setIsCreateSeasonDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleCreateSeason}
+                    disabled={createSeasonMutation.isPending}
+                  >
+                    {createSeasonMutation.isPending ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Creating...
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="h-4 w-4 mr-2" />
+                        Create Season
+                      </>
+                    )}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </CardContent>
         </Card>
       </CreatorLayout>
