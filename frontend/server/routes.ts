@@ -475,9 +475,45 @@ export async function registerRoutes(
         )
         .orderBy(quests.questType, quests.points);
 
-      res.json({ success: true, data: activeQuests });
+      res.json({ success: true, quests: activeQuests });
     } catch (error) {
       console.error("Error fetching quests:", error);
+      res.status(500).json({ success: false, error: "Failed to fetch quests" });
+    }
+  });
+
+  /**
+   * GET /api/quests/creator/:address
+   * Get quests created by a specific address
+   */
+  app.get("/api/quests/creator/:address", async (req, res) => {
+    try {
+      const { address } = req.params;
+      const { seasonId } = req.query;
+      const normalizedAddress = address.toLowerCase();
+
+      let query = db
+        .select()
+        .from(quests)
+        .where(eq(quests.creatorAddress, normalizedAddress));
+
+      if (seasonId && typeof seasonId === "string") {
+        query = db
+          .select()
+          .from(quests)
+          .where(
+            and(
+              eq(quests.creatorAddress, normalizedAddress),
+              eq(quests.seasonId, seasonId)
+            )
+          );
+      }
+
+      const creatorQuests = await query.orderBy(quests.questType, quests.createdAt);
+
+      res.json({ success: true, quests: creatorQuests });
+    } catch (error) {
+      console.error("Error fetching creator quests:", error);
       res.status(500).json({ success: false, error: "Failed to fetch quests" });
     }
   });

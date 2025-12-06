@@ -19,6 +19,7 @@ import CreatorDashboard from "@/pages/creator/CreatorDashboard";
 import ManagePolls from "@/pages/creator/ManagePolls";
 import ManagePoll from "@/pages/creator/ManagePoll";
 import Distributions from "@/pages/creator/Distributions";
+import QuestManager from "@/pages/creator/QuestManager";
 
 // Participant pages
 import ParticipantDashboard from "@/pages/participant/ParticipantDashboard";
@@ -47,6 +48,7 @@ function App() {
             <Route path="/creator/manage/:pollId" component={ManagePoll} />
             <Route path="/creator/manage" component={ManagePolls} />
             <Route path="/creator/distributions" component={Distributions} />
+            <Route path="/creator/quests" component={QuestManager} />
 
             {/* Participant routes */}
             <Route path="/participant" component={ParticipantDashboard} />

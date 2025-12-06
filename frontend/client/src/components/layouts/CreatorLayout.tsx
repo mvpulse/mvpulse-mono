@@ -1,5 +1,5 @@
 import { ReactNode, useMemo, useEffect } from "react";
-import { LayoutDashboard, FolderCog, Send, TrendingUp, PlusCircle, Settings, HelpCircle } from "lucide-react";
+import { LayoutDashboard, FolderCog, Send, TrendingUp, PlusCircle, Settings, HelpCircle, ListChecks } from "lucide-react";
 import { DashboardSidebar, type SidebarSection } from "@/components/DashboardSidebar";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { useTour } from "@/contexts/TourContext";
@@ -39,6 +39,7 @@ export function CreatorLayout({ children, title, description }: CreatorLayoutPro
         { label: "Dashboard", icon: LayoutDashboard, href: "/creator", badge: pollCount },
         { label: "Manage Polls", icon: FolderCog, href: "/creator/manage", dataTour: "sidebar-manage-polls" },
         { label: "Distributions", icon: Send, href: "/creator/distributions", dataTour: "sidebar-distributions" },
+        { label: "Quest Manager", icon: ListChecks, href: "/creator/quests", dataTour: "sidebar-quest-manager" },
       ],
     },
     {
