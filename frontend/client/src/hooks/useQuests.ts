@@ -40,7 +40,8 @@ interface ClaimQuestResponse {
 }
 
 interface SeasonResponse {
-  season: Season | null;
+  season?: Season | null;
+  data?: Season | null;  // Support both formats for compatibility
 }
 
 interface LeaderboardEntry {
@@ -74,12 +75,15 @@ export function useSeason() {
 
       const data: SeasonResponse = await res.json();
 
-      if (!data.season) {
+      // Support both 'season' and 'data' response formats
+      const seasonData = data.season || data.data;
+
+      if (!seasonData) {
         return null;
       }
 
       const now = Date.now();
-      const endTime = new Date(data.season.endTime).getTime();
+      const endTime = new Date(seasonData.endTime).getTime();
       const timeRemaining = endTime > now ? endTime - now : null;
       const daysRemaining = timeRemaining ? Math.ceil(timeRemaining / (1000 * 60 * 60 * 24)) : null;
 
@@ -91,9 +95,9 @@ export function useSeason() {
       };
 
       return {
-        ...data.season,
-        statusName: statusNames[data.season.status] || "Unknown",
-        isActive: data.season.status === SEASON_STATUS.ACTIVE,
+        ...seasonData,
+        statusName: statusNames[seasonData.status] || "Unknown",
+        isActive: seasonData.status === SEASON_STATUS.ACTIVE,
         timeRemaining,
         daysRemaining,
       };

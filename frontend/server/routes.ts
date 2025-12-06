@@ -371,10 +371,10 @@ export async function registerRoutes(
         .limit(1);
 
       if (!currentSeason) {
-        return res.json({ success: true, data: null });
+        return res.json({ success: true, season: null });
       }
 
-      res.json({ success: true, data: currentSeason });
+      res.json({ success: true, season: currentSeason });
     } catch (error) {
       console.error("Error fetching current season:", error);
       res.status(500).json({ success: false, error: "Failed to fetch season" });
