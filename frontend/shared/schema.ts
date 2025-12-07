@@ -250,3 +250,33 @@ export const userSeasonSnapshots = pgTable("user_season_snapshots", {
 
 export type UserSeasonSnapshot = typeof userSeasonSnapshots.$inferSelect;
 export type InsertUserSeasonSnapshot = typeof userSeasonSnapshots.$inferInsert;
+
+// ============================================
+// Gas Sponsorship Logs (for rate limiting)
+// ============================================
+
+export const sponsorshipLogs = pgTable("sponsorship_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  walletAddress: varchar("wallet_address", { length: 66 }).notNull(),
+  txHash: varchar("tx_hash", { length: 66 }),
+  network: varchar("network", { length: 20 }).notNull(), // "testnet" | "mainnet"
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type SponsorshipLog = typeof sponsorshipLogs.$inferSelect;
+export type InsertSponsorshipLog = typeof sponsorshipLogs.$inferInsert;
+
+// ============================================
+// User Settings (for gas sponsorship preference)
+// ============================================
+
+export const userSettings = pgTable("user_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  walletAddress: varchar("wallet_address", { length: 66 }).notNull().unique(),
+  gasSponsorshipEnabled: boolean("gas_sponsorship_enabled").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export type UserSettings = typeof userSettings.$inferSelect;
+export type InsertUserSettings = typeof userSettings.$inferInsert;

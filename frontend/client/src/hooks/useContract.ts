@@ -4,12 +4,22 @@ import { useNetwork } from "@/contexts/NetworkContext";
 import { createAptosClient, getFunctionId, formatTimeRemaining, isPollActive } from "@/lib/contract";
 import { usePrivyWallet } from "@/hooks/usePrivyWallet";
 import { submitPrivyTransaction } from "@/lib/privy-transactions";
+import {
+  submitPrivySponsoredTransaction,
+  submitNativeSponsoredTransaction,
+  type TransactionData,
+} from "@/lib/sponsored-transactions";
 import { CoinTypeId, COIN_TYPES } from "@/lib/tokens";
 import type { Poll, PollWithMeta, CreatePollInput, VoteInput, TransactionResult, PlatformConfig } from "@/types/poll";
 
+// Extended transaction result with sponsorship info
+export interface TransactionResultWithSponsorship extends TransactionResult {
+  sponsored?: boolean;
+}
+
 export function useContract() {
-  const { config } = useNetwork();
-  const { signAndSubmitTransaction, account } = useWallet();
+  const { config, network } = useNetwork();
+  const { signAndSubmitTransaction, signTransaction, account } = useWallet();
   const {
     isPrivyWallet,
     walletAddress: privyAddress,
@@ -26,6 +36,17 @@ export function useContract() {
   // Get the active wallet address (Privy or native)
   const activeAddress = isPrivyWallet ? privyAddress : account?.address?.toString();
 
+  // Check if sponsorship is enabled from localStorage (set by Settings page)
+  const getSponsorshipEnabled = useCallback(() => {
+    const stored = localStorage.getItem("mvpulse-gas-sponsorship-enabled");
+    return stored !== null ? stored === "true" : true; // Default to enabled
+  }, []);
+
+  // Get network type for sponsorship API
+  const getNetworkType = useCallback((): "testnet" | "mainnet" => {
+    return network === "mainnet" ? "mainnet" : "testnet";
+  }, [network]);
+
   // Helper to enrich poll with computed fields
   const enrichPoll = useCallback((poll: Poll): PollWithMeta => {
     const totalVotes = poll.votes.reduce((sum, v) => sum + v, 0);
@@ -41,14 +62,65 @@ export function useContract() {
     };
   }, []);
 
-  // Helper function to execute transaction with dual-path support
+  // Helper function to execute transaction with dual-path support and gas sponsorship
   const executeTransaction = useCallback(
     async (
       functionName: string,
       functionArguments: (string | number | boolean | string[])[],
       errorMessage: string,
       typeArguments: string[] = []
-    ): Promise<TransactionResult> => {
+    ): Promise<TransactionResultWithSponsorship> => {
+      const transactionData: TransactionData = {
+        function: getFunctionId(contractAddress, functionName),
+        typeArguments,
+        functionArguments,
+      };
+
+      const networkType = getNetworkType();
+      const sponsorshipEnabled = getSponsorshipEnabled();
+
+      // Try sponsored transaction first if enabled
+      if (sponsorshipEnabled) {
+        try {
+          if (isPrivyWallet) {
+            // PRIVY WALLET - Sponsored path
+            if (!privyAddress || !privyPublicKey || !signRawHash) {
+              throw new Error("Privy wallet not properly connected");
+            }
+
+            const result = await submitPrivySponsoredTransaction(
+              client,
+              privyAddress,
+              privyPublicKey,
+              signRawHash,
+              transactionData,
+              networkType
+            );
+
+            return { hash: result.hash, success: true, sponsored: true };
+          } else {
+            // NATIVE WALLET - Sponsored path
+            if (!signTransaction || !account?.address) {
+              throw new Error("Wallet does not support sponsored transactions");
+            }
+
+            const result = await submitNativeSponsoredTransaction(
+              client,
+              account.address.toString(),
+              signTransaction as any, // Type cast needed due to wallet adapter types
+              transactionData,
+              networkType
+            );
+
+            return { hash: result.hash, success: true, sponsored: true };
+          }
+        } catch (sponsorError) {
+          console.warn("Sponsorship failed, falling back to user-paid gas:", sponsorError);
+          // Fall through to non-sponsored path
+        }
+      }
+
+      // FALLBACK: Non-sponsored transaction (user pays gas)
       if (isPrivyWallet) {
         if (!privyAddress || !privyPublicKey || !signRawHash) {
           throw new Error("Privy wallet not properly connected");
@@ -59,31 +131,27 @@ export function useContract() {
           privyAddress,
           privyPublicKey,
           signRawHash,
-          {
-            function: getFunctionId(contractAddress, functionName),
-            typeArguments,
-            functionArguments,
-          }
+          transactionData
         );
 
-        return { hash, success: true };
+        return { hash, success: true, sponsored: false };
       } else {
         if (!signAndSubmitTransaction) {
           throw new Error("Wallet not connected");
         }
 
         const response = await signAndSubmitTransaction({
-          data: {
-            function: getFunctionId(contractAddress, functionName),
-            typeArguments,
-            functionArguments,
-          },
+          data: transactionData,
         });
 
-        return { hash: response.hash, success: true };
+        return { hash: response.hash, success: true, sponsored: false };
       }
     },
-    [isPrivyWallet, privyAddress, privyPublicKey, signRawHash, signAndSubmitTransaction, client, contractAddress]
+    [
+      isPrivyWallet, privyAddress, privyPublicKey, signRawHash,
+      signAndSubmitTransaction, signTransaction, account, client,
+      contractAddress, getNetworkType, getSponsorshipEnabled
+    ]
   );
 
   // Create a new poll

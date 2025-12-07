@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, gte } from "drizzle-orm";
 import { db } from "./db";
 import {
   userProfiles,
@@ -10,6 +10,8 @@ import {
   dailyVoteLogs,
   seasonLeaderboard,
   userSeasonSnapshots,
+  sponsorshipLogs,
+  userSettings,
   TIERS,
   TIER_VOTE_LIMITS,
   TIER_PULSE_THRESHOLDS,
@@ -19,6 +21,12 @@ import {
   type Season,
   type Quest,
 } from "@shared/schema";
+
+// ============================================
+// Gas Sponsorship Constants
+// ============================================
+
+const DAILY_SPONSORSHIP_LIMIT = 50; // Max sponsored transactions per address per day
 
 // ============================================
 // Helper Functions
@@ -773,6 +781,271 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error updating season status:", error);
       res.status(500).json({ success: false, error: "Failed to update status" });
+    }
+  });
+
+  // ============================================
+  // Gas Sponsorship Routes
+  // ============================================
+
+  /**
+   * GET /api/sponsorship-status
+   * Check gas sponsorship availability for an address
+   */
+  app.get("/api/sponsorship-status", async (req, res) => {
+    try {
+      const { address, network } = req.query;
+
+      if (!address || typeof address !== "string") {
+        return res.status(400).json({ success: false, error: "Address is required" });
+      }
+
+      const normalizedAddress = address.toLowerCase();
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      // Count today's sponsored transactions
+      const dailyLogs = await db
+        .select()
+        .from(sponsorshipLogs)
+        .where(
+          and(
+            eq(sponsorshipLogs.walletAddress, normalizedAddress),
+            gte(sponsorshipLogs.createdAt, today)
+          )
+        );
+
+      const dailyUsed = dailyLogs.length;
+      const remaining = Math.max(0, DAILY_SPONSORSHIP_LIMIT - dailyUsed);
+
+      // Get user settings
+      const [settings] = await db
+        .select()
+        .from(userSettings)
+        .where(eq(userSettings.walletAddress, normalizedAddress))
+        .limit(1);
+
+      res.json({
+        success: true,
+        dailyUsed,
+        dailyLimit: DAILY_SPONSORSHIP_LIMIT,
+        remaining,
+        enabled: settings?.gasSponsorshipEnabled ?? true, // Default to enabled
+      });
+    } catch (error) {
+      console.error("Error checking sponsorship status:", error);
+      res.status(500).json({ success: false, error: "Failed to check status" });
+    }
+  });
+
+  /**
+   * POST /api/sponsor-transaction
+   * Sponsor and submit a transaction via Shinami Gas Station
+   */
+  app.post("/api/sponsor-transaction", async (req, res) => {
+    try {
+      const { serializedTransaction, senderSignature, senderAddress, network } = req.body;
+
+      if (!serializedTransaction || !senderSignature || !senderAddress) {
+        return res.status(400).json({
+          success: false,
+          error: "Missing required parameters",
+          fallbackRequired: true,
+        });
+      }
+
+      const normalizedAddress = senderAddress.toLowerCase();
+      const networkType = network === "mainnet" ? "mainnet" : "testnet";
+
+      // Check rate limit
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const dailyLogs = await db
+        .select()
+        .from(sponsorshipLogs)
+        .where(
+          and(
+            eq(sponsorshipLogs.walletAddress, normalizedAddress),
+            gte(sponsorshipLogs.createdAt, today)
+          )
+        );
+
+      const dailyUsed = dailyLogs.length;
+
+      if (dailyUsed >= DAILY_SPONSORSHIP_LIMIT) {
+        return res.json({
+          success: false,
+          fallbackRequired: true,
+          reason: "daily_limit",
+          dailyUsed,
+          dailyLimit: DAILY_SPONSORSHIP_LIMIT,
+        });
+      }
+
+      // Select API key based on network
+      const apiKey = networkType === "mainnet"
+        ? process.env.SHINAMI_GAS_KEY_MAINNET
+        : process.env.SHINAMI_GAS_KEY_TESTNET;
+
+      if (!apiKey) {
+        console.error(`Shinami API key not configured for ${networkType}`);
+        return res.json({
+          success: false,
+          fallbackRequired: true,
+          error: "Gas sponsorship not configured for this network",
+        });
+      }
+
+      // Call Shinami Gas Station API
+      const shinamiResponse = await fetch("https://api.us1.shinami.com/movement/gas/v1", {
+        method: "POST",
+        headers: {
+          "X-API-Key": apiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          method: "gas_sponsorAndSubmitSignedTransaction",
+          params: [serializedTransaction, senderSignature],
+          id: 1,
+        }),
+      });
+
+      if (!shinamiResponse.ok) {
+        const errorText = await shinamiResponse.text();
+        console.error("Shinami API error:", errorText);
+        return res.json({
+          success: false,
+          fallbackRequired: true,
+          error: "Shinami API error",
+        });
+      }
+
+      const result = await shinamiResponse.json();
+
+      // Check for JSON-RPC errors
+      if (result.error) {
+        console.error("Shinami RPC error:", result.error);
+        return res.json({
+          success: false,
+          fallbackRequired: true,
+          error: result.error.message || "Shinami RPC error",
+        });
+      }
+
+      const pendingTx = result.result?.pendingTransaction;
+
+      if (!pendingTx?.hash) {
+        console.error("Unexpected Shinami response:", result);
+        return res.json({
+          success: false,
+          fallbackRequired: true,
+          error: "Unexpected response from Shinami",
+        });
+      }
+
+      // Log successful sponsorship
+      await db.insert(sponsorshipLogs).values({
+        walletAddress: normalizedAddress,
+        txHash: pendingTx.hash,
+        network: networkType,
+      });
+
+      res.json({
+        success: true,
+        transactionHash: pendingTx.hash,
+        sender: pendingTx.sender,
+        sequenceNumber: pendingTx.sequence_number,
+        sponsored: true,
+        dailyUsed: dailyUsed + 1,
+        dailyLimit: DAILY_SPONSORSHIP_LIMIT,
+      });
+    } catch (error) {
+      console.error("Error sponsoring transaction:", error);
+      res.json({
+        success: false,
+        fallbackRequired: true,
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  /**
+   * GET /api/user/settings/:address
+   * Get user settings including gas sponsorship preference
+   */
+  app.get("/api/user/settings/:address", async (req, res) => {
+    try {
+      const { address } = req.params;
+      const normalizedAddress = address.toLowerCase();
+
+      const [settings] = await db
+        .select()
+        .from(userSettings)
+        .where(eq(userSettings.walletAddress, normalizedAddress))
+        .limit(1);
+
+      if (!settings) {
+        // Return defaults
+        return res.json({
+          success: true,
+          data: {
+            walletAddress: normalizedAddress,
+            gasSponsorshipEnabled: true, // Default to enabled
+          },
+        });
+      }
+
+      res.json({ success: true, data: settings });
+    } catch (error) {
+      console.error("Error fetching user settings:", error);
+      res.status(500).json({ success: false, error: "Failed to fetch settings" });
+    }
+  });
+
+  /**
+   * PUT /api/user/settings/:address
+   * Update user settings
+   */
+  app.put("/api/user/settings/:address", async (req, res) => {
+    try {
+      const { address } = req.params;
+      const { gasSponsorshipEnabled } = req.body;
+      const normalizedAddress = address.toLowerCase();
+
+      // Upsert settings
+      const [existing] = await db
+        .select()
+        .from(userSettings)
+        .where(eq(userSettings.walletAddress, normalizedAddress))
+        .limit(1);
+
+      if (existing) {
+        const [updated] = await db
+          .update(userSettings)
+          .set({
+            gasSponsorshipEnabled: gasSponsorshipEnabled ?? existing.gasSponsorshipEnabled,
+            updatedAt: new Date(),
+          })
+          .where(eq(userSettings.id, existing.id))
+          .returning();
+
+        res.json({ success: true, data: updated });
+      } else {
+        const [created] = await db
+          .insert(userSettings)
+          .values({
+            walletAddress: normalizedAddress,
+            gasSponsorshipEnabled: gasSponsorshipEnabled ?? true,
+          })
+          .returning();
+
+        res.json({ success: true, data: created });
+      }
+    } catch (error) {
+      console.error("Error updating user settings:", error);
+      res.status(500).json({ success: false, error: "Failed to update settings" });
     }
   });
 

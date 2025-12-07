@@ -4,6 +4,7 @@ import { AIChatAssistant } from "@/components/AIChatAssistant";
 import { GuidedTour } from "@/components/GuidedTour";
 import { SidebarProvider } from "@/contexts/SidebarContext";
 import { TourProvider } from "@/contexts/TourContext";
+import { GasSponsorshipProvider } from "@/contexts/GasSponsorshipContext";
 import Home from "@/pages/Home";
 import Dashboard from "@/pages/Dashboard";
 import Projects from "@/pages/Projects";
@@ -12,6 +13,7 @@ import PollDetails from "@/pages/PollDetails";
 import Admin from "@/pages/Admin";
 import Wallet from "@/pages/Wallet";
 import Swap from "@/pages/Swap";
+import Settings from "@/pages/Settings";
 import NotFound from "@/pages/not-found";
 
 // Creator pages
@@ -32,7 +34,8 @@ function App() {
   return (
     <SidebarProvider>
       <TourProvider>
-        <Layout>
+        <GasSponsorshipProvider>
+          <Layout>
           <Switch>
             <Route path="/" component={Home} />
             <Route path="/dashboard" component={Dashboard} />
@@ -41,6 +44,7 @@ function App() {
             <Route path="/poll/:id" component={PollDetails} />
             <Route path="/wallet" component={Wallet} />
             <Route path="/swap" component={Swap} />
+            <Route path="/settings" component={Settings} />
             <Route path="/admin" component={Admin} />
 
             {/* Creator routes */}
@@ -61,7 +65,8 @@ function App() {
           </Switch>
           <AIChatAssistant />
           <GuidedTour />
-        </Layout>
+          </Layout>
+        </GasSponsorshipProvider>
       </TourProvider>
     </SidebarProvider>
   );
