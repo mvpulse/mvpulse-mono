@@ -48,6 +48,7 @@ export interface LiquidityPosition {
 export interface TransactionResult {
   hash: string;
   success: boolean;
+  sponsored?: boolean;  // Whether gas was sponsored by Shinami
 }
 
 export function useSwap() {

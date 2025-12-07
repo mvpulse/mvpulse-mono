@@ -21,8 +21,8 @@ import { useContract } from "@/hooks/useContract";
 import { useWalletConnection } from "@/hooks/useWalletConnection";
 import type { PollWithMeta } from "@/types/poll";
 import { POLL_STATUS, DISTRIBUTION_MODE } from "@/types/poll";
-import { toast } from "sonner";
 import { useNetwork } from "@/contexts/NetworkContext";
+import { showTransactionSuccessToast, showTransactionErrorToast } from "@/lib/transaction-feedback";
 
 export default function Distributions() {
   const { isConnected, address } = useWalletConnection();
@@ -107,19 +107,17 @@ export default function Distributions() {
     setDistributingPollId(pollId);
     try {
       const result = await distributeRewards(pollId);
-      toast.success("Rewards Distributed!", {
-        description: "All voters have received their rewards.",
-        action: {
-          label: "View TX",
-          onClick: () => window.open(`${config.explorerUrl}/txn/${result.hash}?network=testnet`, "_blank"),
-        },
-      });
+      showTransactionSuccessToast(
+        result.hash,
+        "Rewards Distributed!",
+        "All voters have received their rewards.",
+        config.explorerUrl,
+        result.sponsored
+      );
       await fetchPolls();
     } catch (error) {
       console.error("Failed to distribute:", error);
-      toast.error("Failed to distribute rewards", {
-        description: error instanceof Error ? error.message : "Transaction failed",
-      });
+      showTransactionErrorToast("Failed to distribute rewards", error instanceof Error ? error : "Transaction failed");
     } finally {
       setDistributingPollId(null);
     }

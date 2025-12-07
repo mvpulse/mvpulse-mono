@@ -27,6 +27,8 @@ import { useSwap, type PoolInfo, type SwapQuote, type LiquidityPosition } from "
 import { getAllBalances, type AllBalances } from "@/lib/balance";
 import { COIN_TYPES, getCoinDecimals } from "@/lib/tokens";
 import { WalletSelectionModal } from "@/components/WalletSelectionModal";
+import { TransactionConfirmationDialog } from "@/components/TransactionConfirmationDialog";
+import { showTransactionSuccessToast, showTransactionErrorToast } from "@/lib/transaction-feedback";
 import {
   Popover,
   PopoverContent,
@@ -34,7 +36,7 @@ import {
 } from "@/components/ui/popover";
 
 export default function SwapPage() {
-  const { isConnected, address } = useWalletConnection();
+  const { isConnected, address, isPrivyWallet } = useWalletConnection();
   const { network, config } = useNetwork();
   const {
     loading,
@@ -68,6 +70,11 @@ export default function SwapPage() {
   const [pulseAmount, setPulseAmount] = useState("");
   const [usdcAmount, setUsdcAmount] = useState("");
   const [removePercent, setRemovePercent] = useState(50);
+
+  // Confirmation dialog state for Privy wallets
+  const [showSwapConfirmation, setShowSwapConfirmation] = useState(false);
+  const [showAddLiquidityConfirmation, setShowAddLiquidityConfirmation] = useState(false);
+  const [isExecuting, setIsExecuting] = useState(false);
 
   const isTestnet = network === "testnet";
 
@@ -141,31 +148,87 @@ export default function SwapPage() {
     setSwapAmount(maxAmount.toString());
   };
 
-  // Handle swap
-  const handleSwap = async () => {
-    if (!swapQuote || loading) return;
+  // Execute swap transaction
+  const executeSwap = async () => {
+    if (!swapQuote) return;
 
+    setIsExecuting(true);
     try {
       // Calculate minimum output with slippage
       const slippageMultiplier = 1 - slippageTolerance / 100;
       const minAmountOut = Math.floor(swapQuote.amountOut * slippageMultiplier);
 
+      let result;
       if (isPulseToUsdc) {
-        await swapPulseToUsdc(swapQuote.amountIn, minAmountOut);
+        result = await swapPulseToUsdc(swapQuote.amountIn, minAmountOut);
       } else {
-        await swapUsdcToPulse(swapQuote.amountIn, minAmountOut);
+        result = await swapUsdcToPulse(swapQuote.amountIn, minAmountOut);
       }
 
-      toast.success("Swap successful!");
+      showTransactionSuccessToast(
+        result.hash,
+        "Swap Successful!",
+        `Swapped ${swapAmount} ${inputSymbol} for ${swapQuote.amountOutFormatted} ${outputSymbol}`,
+        config.explorerUrl,
+        result.sponsored
+      );
       setSwapAmount("");
       setSwapQuote(null);
       fetchData();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Swap failed");
+      showTransactionErrorToast("Swap Failed", err instanceof Error ? err : "Transaction failed");
+    } finally {
+      setIsExecuting(false);
+      setShowSwapConfirmation(false);
     }
   };
 
-  // Handle add liquidity
+  // Handle swap button click
+  const handleSwap = async () => {
+    if (!swapQuote || loading) return;
+
+    // If Privy wallet, show confirmation dialog first
+    if (isPrivyWallet) {
+      setShowSwapConfirmation(true);
+      return;
+    }
+
+    // Otherwise execute directly (native wallets show their own confirmation)
+    await executeSwap();
+  };
+
+  // Execute add liquidity transaction
+  const executeAddLiquidity = async () => {
+    const pulseAmt = parseFloat(pulseAmount);
+    const usdcAmt = parseFloat(usdcAmount);
+
+    setIsExecuting(true);
+    try {
+      const pulseInSmallest = Math.floor(pulseAmt * Math.pow(10, getCoinDecimals(COIN_TYPES.PULSE)));
+      const usdcInSmallest = Math.floor(usdcAmt * Math.pow(10, getCoinDecimals(COIN_TYPES.USDC)));
+
+      // Set minimum LP shares to 0 for simplicity (could add slippage protection)
+      const result = await addLiquidity(pulseInSmallest, usdcInSmallest, 0);
+
+      showTransactionSuccessToast(
+        result.hash,
+        "Liquidity Added!",
+        `Added ${pulseAmount} PULSE and ${usdcAmount} USDC to the pool`,
+        config.explorerUrl,
+        result.sponsored
+      );
+      setPulseAmount("");
+      setUsdcAmount("");
+      fetchData();
+    } catch (err) {
+      showTransactionErrorToast("Failed to Add Liquidity", err instanceof Error ? err : "Transaction failed");
+    } finally {
+      setIsExecuting(false);
+      setShowAddLiquidityConfirmation(false);
+    }
+  };
+
+  // Handle add liquidity button click
   const handleAddLiquidity = async () => {
     const pulseAmt = parseFloat(pulseAmount);
     const usdcAmt = parseFloat(usdcAmount);
@@ -175,23 +238,17 @@ export default function SwapPage() {
       return;
     }
 
-    try {
-      const pulseInSmallest = Math.floor(pulseAmt * Math.pow(10, getCoinDecimals(COIN_TYPES.PULSE)));
-      const usdcInSmallest = Math.floor(usdcAmt * Math.pow(10, getCoinDecimals(COIN_TYPES.USDC)));
-
-      // Set minimum LP shares to 0 for simplicity (could add slippage protection)
-      await addLiquidity(pulseInSmallest, usdcInSmallest, 0);
-
-      toast.success("Liquidity added successfully!");
-      setPulseAmount("");
-      setUsdcAmount("");
-      fetchData();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to add liquidity");
+    // If Privy wallet, show confirmation dialog first
+    if (isPrivyWallet) {
+      setShowAddLiquidityConfirmation(true);
+      return;
     }
+
+    // Otherwise execute directly (native wallets show their own confirmation)
+    await executeAddLiquidity();
   };
 
-  // Handle remove liquidity
+  // Handle remove liquidity (no confirmation needed - user receives funds)
   const handleRemoveLiquidity = async () => {
     if (!lpPosition || lpPosition.shares <= 0) {
       toast.error("No liquidity to remove");
@@ -212,13 +269,19 @@ export default function SwapPage() {
       const minPulse = Math.floor(expectedPulse * slippageMultiplier);
       const minUsdc = Math.floor(expectedUsdc * slippageMultiplier);
 
-      await removeLiquidity(sharesToRemove, minPulse, minUsdc);
+      const result = await removeLiquidity(sharesToRemove, minPulse, minUsdc);
 
-      toast.success("Liquidity removed successfully!");
+      showTransactionSuccessToast(
+        result.hash,
+        "Liquidity Removed!",
+        `Removed ${removePercent}% of your liquidity position`,
+        config.explorerUrl,
+        result.sponsored
+      );
       setRemovePercent(50);
       fetchData();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to remove liquidity");
+      showTransactionErrorToast("Failed to Remove Liquidity", err instanceof Error ? err : "Transaction failed");
     }
   };
 
@@ -701,6 +764,41 @@ export default function SwapPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Privy Wallet Confirmation Dialogs */}
+      <TransactionConfirmationDialog
+        open={showSwapConfirmation}
+        onOpenChange={setShowSwapConfirmation}
+        onConfirm={executeSwap}
+        onCancel={() => setShowSwapConfirmation(false)}
+        isLoading={isExecuting}
+        title="Confirm Swap"
+        description={`Swap ${inputSymbol} for ${outputSymbol}`}
+        amount={parseFloat(swapAmount) || 0}
+        tokenSymbol={inputSymbol}
+        details={swapQuote ? [
+          { label: "You Receive", value: `${swapQuote.amountOutFormatted} ${outputSymbol}` },
+          { label: "Rate", value: `1 ${inputSymbol} = ${swapQuote.rate} ${outputSymbol}` },
+          { label: "Price Impact", value: `${swapQuote.priceImpactPercent}%` },
+          { label: "Slippage Tolerance", value: `${slippageTolerance}%` },
+        ] : []}
+      />
+
+      <TransactionConfirmationDialog
+        open={showAddLiquidityConfirmation}
+        onOpenChange={setShowAddLiquidityConfirmation}
+        onConfirm={executeAddLiquidity}
+        onCancel={() => setShowAddLiquidityConfirmation(false)}
+        isLoading={isExecuting}
+        title="Confirm Add Liquidity"
+        description="Provide liquidity to the PULSE/USDC pool"
+        amount={parseFloat(pulseAmount) || 0}
+        tokenSymbol="PULSE"
+        details={[
+          { label: "PULSE Amount", value: `${pulseAmount || "0"} PULSE` },
+          { label: "USDC Amount", value: `${usdcAmount || "0"} USDC` },
+        ]}
+      />
     </div>
   );
 }

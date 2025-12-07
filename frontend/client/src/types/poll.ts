@@ -79,6 +79,7 @@ export interface VoteInput {
 export interface TransactionResult {
   hash: string;
   success: boolean;
+  sponsored?: boolean;  // Whether gas was sponsored by Shinami
 }
 
 // Error type for contract calls

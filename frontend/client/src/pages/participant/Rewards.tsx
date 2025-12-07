@@ -19,8 +19,8 @@ import { useContract } from "@/hooks/useContract";
 import type { PollWithMeta } from "@/types/poll";
 import { POLL_STATUS, DISTRIBUTION_MODE } from "@/types/poll";
 import { COIN_TYPES, getCoinSymbol, type CoinTypeId } from "@/lib/tokens";
-import { toast } from "sonner";
 import { useNetwork } from "@/contexts/NetworkContext";
+import { showTransactionSuccessToast, showTransactionErrorToast } from "@/lib/transaction-feedback";
 
 export default function Rewards() {
   const { isConnected, address } = useWalletConnection();
@@ -117,19 +117,17 @@ export default function Rewards() {
     setClaimingPollId(pollId);
     try {
       const result = await claimReward(pollId, coinTypeId);
-      toast.success("Reward Claimed!", {
-        description: "Your reward has been transferred to your wallet.",
-        action: {
-          label: "View TX",
-          onClick: () => window.open(`${config.explorerUrl}/txn/${result.hash}?network=testnet`, "_blank"),
-        },
-      });
+      showTransactionSuccessToast(
+        result.hash,
+        "Reward Claimed!",
+        "Your reward has been transferred to your wallet.",
+        config.explorerUrl,
+        result.sponsored
+      );
       setClaimedPollIds((prev) => new Set(prev).add(pollId));
     } catch (error) {
       console.error("Failed to claim:", error);
-      toast.error("Failed to claim reward", {
-        description: error instanceof Error ? error.message : "Transaction failed",
-      });
+      showTransactionErrorToast("Failed to claim reward", error instanceof Error ? error : "Transaction failed");
     } finally {
       setClaimingPollId(null);
     }

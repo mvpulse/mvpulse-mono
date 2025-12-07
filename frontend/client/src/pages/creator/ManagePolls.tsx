@@ -42,6 +42,7 @@ import { POLL_STATUS, DISTRIBUTION_MODE } from "@/types/poll";
 import { toast } from "sonner";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { truncateAddress } from "@/lib/contract";
+import { showTransactionSuccessToast, showTransactionErrorToast } from "@/lib/transaction-feedback";
 
 export default function ManagePolls() {
   const { isConnected, address } = useWalletConnection();
@@ -124,22 +125,20 @@ export default function ManagePolls() {
     setActionLoading({ type: "close", pollId: closePollModal.pollId });
     try {
       const result = await closePoll(closePollModal.pollId, selectedDistributionMode);
-      toast.success("Poll Closed!", {
-        description: selectedDistributionMode === DISTRIBUTION_MODE.MANUAL_PULL
+      showTransactionSuccessToast(
+        result.hash,
+        "Poll Closed!",
+        selectedDistributionMode === DISTRIBUTION_MODE.MANUAL_PULL
           ? "Participants can now claim their rewards."
           : "You can now distribute rewards to all voters.",
-        action: {
-          label: "View TX",
-          onClick: () => window.open(`${config.explorerUrl}/txn/${result.hash}?network=testnet`, "_blank"),
-        },
-      });
+        config.explorerUrl,
+        result.sponsored
+      );
       setClosePollModal({ open: false, pollId: null });
       await fetchPolls();
     } catch (error) {
       console.error("Failed to close poll:", error);
-      toast.error("Failed to close poll", {
-        description: error instanceof Error ? error.message : "Transaction failed",
-      });
+      showTransactionErrorToast("Failed to close poll", error instanceof Error ? error : "Transaction failed");
     } finally {
       setActionLoading(null);
     }
@@ -150,19 +149,17 @@ export default function ManagePolls() {
     setActionLoading({ type: "distribute", pollId });
     try {
       const result = await distributeRewards(pollId);
-      toast.success("Rewards Distributed!", {
-        description: "All voters have received their rewards.",
-        action: {
-          label: "View TX",
-          onClick: () => window.open(`${config.explorerUrl}/txn/${result.hash}?network=testnet`, "_blank"),
-        },
-      });
+      showTransactionSuccessToast(
+        result.hash,
+        "Rewards Distributed!",
+        "All voters have received their rewards.",
+        config.explorerUrl,
+        result.sponsored
+      );
       await fetchPolls();
     } catch (error) {
       console.error("Failed to distribute:", error);
-      toast.error("Failed to distribute rewards", {
-        description: error instanceof Error ? error.message : "Transaction failed",
-      });
+      showTransactionErrorToast("Failed to distribute rewards", error instanceof Error ? error : "Transaction failed");
     } finally {
       setActionLoading(null);
     }
@@ -173,19 +170,17 @@ export default function ManagePolls() {
     setActionLoading({ type: "withdraw", pollId });
     try {
       const result = await withdrawRemaining(pollId);
-      toast.success("Funds Withdrawn!", {
-        description: "Remaining funds have been returned to your wallet.",
-        action: {
-          label: "View TX",
-          onClick: () => window.open(`${config.explorerUrl}/txn/${result.hash}?network=testnet`, "_blank"),
-        },
-      });
+      showTransactionSuccessToast(
+        result.hash,
+        "Funds Withdrawn!",
+        "Remaining funds have been returned to your wallet.",
+        config.explorerUrl,
+        result.sponsored
+      );
       await fetchPolls();
     } catch (error) {
       console.error("Failed to withdraw:", error);
-      toast.error("Failed to withdraw funds", {
-        description: error instanceof Error ? error.message : "Transaction failed",
-      });
+      showTransactionErrorToast("Failed to withdraw funds", error instanceof Error ? error : "Transaction failed");
     } finally {
       setActionLoading(null);
     }

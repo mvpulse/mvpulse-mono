@@ -15,6 +15,8 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { REWARD_TYPE, PLATFORM_FEE_BPS, calculatePlatformFee, calculateNetAmount, COIN_TYPE } from "@/types/poll";
 import { COIN_TYPES, getCoinSymbol, CoinTypeId } from "@/lib/tokens";
+import { TransactionConfirmationDialog } from "@/components/TransactionConfirmationDialog";
+import { showTransactionSuccessToast, showTransactionErrorToast } from "@/lib/transaction-feedback";
 
 // Duration options in seconds
 const DURATION_OPTIONS = {
@@ -41,9 +43,13 @@ interface AIGeneratedPoll {
 export default function CreatePoll() {
   const [, setLocation] = useLocation();
   const searchString = useSearch();
-  const { isConnected } = useWalletConnection();
+  const { isConnected, isPrivyWallet } = useWalletConnection();
   const { createPoll, loading } = useContract();
   const { config } = useNetwork();
+
+  // Confirmation dialog state for Privy wallets
+  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [isExecuting, setIsExecuting] = useState(false);
 
   // Form state
   const [step, setStep] = useState(1);
@@ -189,25 +195,9 @@ export default function CreatePoll() {
     return true;
   };
 
-  const handleCreate = async () => {
-    console.log("handleCreate called", { isConnected, contractAddress: config.contractAddress });
-
-    if (!isConnected) {
-      toast.error("Please connect your wallet first");
-      return;
-    }
-
-    if (!config.contractAddress) {
-      toast.error("Contract not available on this network");
-      return;
-    }
-
-    if (!validateForm()) {
-      console.log("Form validation failed");
-      return;
-    }
-
-    console.log("Form validated, creating poll...");
+  // Execute the poll creation transaction
+  const executeCreatePoll = async () => {
+    setIsExecuting(true);
 
     try {
       const validOptions = options.filter((o) => o.trim());
@@ -231,22 +221,56 @@ export default function CreatePoll() {
         coinTypeId: selectedToken,
       });
 
-      toast.success("Poll Created!", {
-        description: "Your poll has been deployed to the Movement network.",
-        action: {
-          label: "View TX",
-          onClick: () => window.open(`${config.explorerUrl}/txn/${result.hash}?network=testnet`, "_blank"),
-        },
-      });
+      showTransactionSuccessToast(
+        result.hash,
+        "Poll Created!",
+        "Your poll has been deployed to the Movement network.",
+        config.explorerUrl,
+        result.sponsored
+      );
 
       // Navigate to dashboard after success
       setTimeout(() => setLocation("/dashboard"), 1500);
     } catch (error) {
       console.error("Failed to create poll:", error);
-      toast.error("Failed to create poll", {
-        description: error instanceof Error ? error.message : "Transaction failed",
-      });
+      showTransactionErrorToast(
+        "Failed to create poll",
+        error instanceof Error ? error : "Transaction failed"
+      );
+    } finally {
+      setIsExecuting(false);
+      setShowConfirmation(false);
     }
+  };
+
+  const handleCreate = async () => {
+    console.log("handleCreate called", { isConnected, contractAddress: config.contractAddress });
+
+    if (!isConnected) {
+      toast.error("Please connect your wallet first");
+      return;
+    }
+
+    if (!config.contractAddress) {
+      toast.error("Contract not available on this network");
+      return;
+    }
+
+    if (!validateForm()) {
+      console.log("Form validation failed");
+      return;
+    }
+
+    console.log("Form validated, creating poll...");
+
+    // If Privy wallet + has incentives, show confirmation dialog first
+    if (isPrivyWallet && calculations.grossAmount > 0) {
+      setShowConfirmation(true);
+      return;
+    }
+
+    // Otherwise execute directly (native wallets show their own confirmation)
+    await executeCreatePoll();
   };
 
   const steps = [
@@ -651,10 +675,10 @@ export default function CreatePoll() {
           ) : (
             <Button
               onClick={handleCreate}
-              disabled={!isConnected || loading}
+              disabled={!isConnected || loading || isExecuting}
               className="bg-primary text-primary-foreground hover:bg-primary/90 px-8"
             >
-              {loading ? (
+              {loading || isExecuting ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Creating...
                 </>
@@ -667,6 +691,24 @@ export default function CreatePoll() {
           )}
         </div>
       </div>
+
+      {/* Privy Wallet Confirmation Dialog */}
+      <TransactionConfirmationDialog
+        open={showConfirmation}
+        onOpenChange={setShowConfirmation}
+        onConfirm={executeCreatePoll}
+        onCancel={() => setShowConfirmation(false)}
+        isLoading={isExecuting}
+        title="Confirm Poll Creation"
+        description="Create poll with voter incentives"
+        amount={calculations.grossAmount}
+        tokenSymbol={getCoinSymbol(selectedToken)}
+        details={[
+          { label: "Reward Pool", value: `${calculations.netAmount.toFixed(4)} ${getCoinSymbol(selectedToken)}` },
+          { label: "Platform Fee", value: `${calculations.fee.toFixed(4)} ${getCoinSymbol(selectedToken)}` },
+          { label: "Max Voters", value: calculations.maxVoters.toString() },
+        ]}
+      />
     </div>
   );
 }
