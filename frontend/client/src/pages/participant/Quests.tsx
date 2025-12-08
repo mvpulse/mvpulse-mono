@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ParticipantLayout } from "@/components/layouts/ParticipantLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
@@ -10,7 +11,7 @@ import { SeasonBanner, NoSeasonBanner } from "@/components/SeasonBanner";
 import { TierBadge, TierProgress } from "@/components/TierBadge";
 import { DailyVoteLimit } from "@/components/DailyVoteLimit";
 import { StreakDisplay } from "@/components/StreakDisplay";
-import { Wallet, ListChecks, Trophy, Flame, Vote } from "lucide-react";
+import { Wallet, ListChecks, Trophy } from "lucide-react";
 
 export default function Quests() {
   const { address, isConnected } = useWalletConnection();
@@ -60,7 +61,7 @@ export default function Quests() {
   // Not connected state
   if (!isConnected) {
     return (
-      <div className="container max-w-6xl mx-auto px-4 py-8">
+      <ParticipantLayout title="Quests" description="Complete quests to earn points">
         <Card className="border-yellow-500/50 bg-yellow-500/10">
           <CardContent className="flex flex-col items-center justify-center py-12">
             <Wallet className="w-12 h-12 text-yellow-500 mb-4" />
@@ -70,7 +71,7 @@ export default function Quests() {
             </p>
           </CardContent>
         </Card>
-      </div>
+      </ParticipantLayout>
     );
   }
 
@@ -78,35 +79,27 @@ export default function Quests() {
 
   if (isLoading) {
     return (
-      <div className="container max-w-6xl mx-auto px-4 py-8 space-y-6">
-        <Skeleton className="h-40 w-full" />
-        <div className="grid md:grid-cols-3 gap-4">
-          <Skeleton className="h-32" />
-          <Skeleton className="h-32" />
-          <Skeleton className="h-32" />
+      <ParticipantLayout title="Quests" description="Complete quests to earn points">
+        <div className="space-y-6">
+          <Skeleton className="h-40 w-full" />
+          <div className="grid md:grid-cols-3 gap-4">
+            <Skeleton className="h-32" />
+            <Skeleton className="h-32" />
+            <Skeleton className="h-32" />
+          </div>
+          <Skeleton className="h-10 w-full" />
+          <div className="grid md:grid-cols-2 gap-4">
+            <Skeleton className="h-48" />
+            <Skeleton className="h-48" />
+          </div>
         </div>
-        <Skeleton className="h-10 w-full" />
-        <div className="grid md:grid-cols-2 gap-4">
-          <Skeleton className="h-48" />
-          <Skeleton className="h-48" />
-        </div>
-      </div>
+      </ParticipantLayout>
     );
   }
 
   return (
-    <div className="container max-w-6xl mx-auto px-4 py-8 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
-      {/* Page Header */}
-      <div>
-        <h1 className="text-3xl font-bold flex items-center gap-2">
-          <ListChecks className="w-8 h-8 text-primary" />
-          Quests
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          Complete quests to earn points and climb the leaderboard!
-        </p>
-      </div>
-
+    <ParticipantLayout title="Quests" description="Complete quests to earn points and climb the leaderboard!">
+      <div className="space-y-6">
       {/* Season Banner */}
       {season ? (
         <SeasonBanner
@@ -191,6 +184,7 @@ export default function Quests() {
           </CardContent>
         </Card>
       )}
-    </div>
+      </div>
+    </ParticipantLayout>
   );
 }
