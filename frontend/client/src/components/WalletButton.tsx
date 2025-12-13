@@ -10,11 +10,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { WalletSelectionModal } from "./WalletSelectionModal";
-import { Wallet, LogOut, Copy, ExternalLink, Loader2, AlertTriangle, Coins, Settings } from "lucide-react";
+import { TierBadge } from "./TierBadge";
+import { Wallet, LogOut, Copy, ExternalLink, Loader2, AlertTriangle, Coins, Settings, Lock, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import { Link } from "wouter";
 import { usePrivyWallet } from "@/hooks/usePrivyWallet";
 import { useNetwork } from "@/contexts/NetworkContext";
+import { useUserProfile } from "@/hooks/useUserProfile";
 
 export function WalletButton() {
   const { connected, account, disconnect, wallet } = useWallet();
@@ -29,6 +31,13 @@ export function WalletButton() {
   } = usePrivyWallet();
 
   const { network } = useNetwork();
+
+  // Determine active address early for useUserProfile
+  const isNativeWalletEarly = connected && !isPrivyWallet;
+  const activeAddressEarly = isPrivyWallet ? privyAddress : account?.address?.toString();
+
+  // Get user profile with tier info
+  const { tier } = useUserProfile(activeAddressEarly || undefined);
 
   // Track previous funding state for toast notifications
   const prevIsFunding = useRef(false);
@@ -148,6 +157,20 @@ export function WalletButton() {
             <DropdownMenuSeparator />
           </>
         )}
+        {/* Tier Badge and Stake Button */}
+        <div className="px-2 py-2">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-muted-foreground">Your Tier</span>
+            <TierBadge tier={tier} size="sm" showTooltip={false} />
+          </div>
+          <Link href="/staking">
+            <Button size="sm" variant="outline" className="w-full text-xs h-7 border-purple-500/50 text-purple-600 hover:bg-purple-500/10">
+              <TrendingUp className="w-3 h-3 mr-1" />
+              Stake to Upgrade
+            </Button>
+          </Link>
+        </div>
+        <DropdownMenuSeparator />
         <Link href="/wallet">
           <DropdownMenuItem className="cursor-pointer">
             <Coins className="w-4 h-4 mr-2" />

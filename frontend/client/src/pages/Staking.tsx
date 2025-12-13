@@ -30,6 +30,7 @@ import {
   Users,
   ChevronRight,
 } from "lucide-react";
+import { TierRequirementsPopover } from "@/components/TierRequirementsPopover";
 import { toast } from "sonner";
 import { useWalletConnection } from "@/hooks/useWalletConnection";
 import { useNetwork } from "@/contexts/NetworkContext";
@@ -310,10 +311,13 @@ export default function StakingPage() {
     <div className="container max-w-6xl mx-auto px-4 py-8">
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-3xl font-display font-bold flex items-center gap-2">
-          <Lock className="w-8 h-8" />
-          PULSE Staking
-        </h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-3xl font-display font-bold flex items-center gap-2">
+            <Lock className="w-8 h-8" />
+            PULSE Staking
+          </h1>
+          <TierRequirementsPopover align="start" />
+        </div>
         <p className="text-muted-foreground">
           Stake your PULSE tokens to boost your tier and unlock more daily votes
         </p>
@@ -394,6 +398,7 @@ export default function StakingPage() {
               <CardTitle className="flex items-center gap-2">
                 <TrendingUp className="w-5 h-5" />
                 Your Tier Progress
+                <TierRequirementsPopover align="center" iconClassName="w-4 h-4 text-muted-foreground" />
               </CardTitle>
               <CardDescription>
                 Your tier is calculated from wallet balance + staked PULSE
@@ -558,6 +563,7 @@ export default function StakingPage() {
               <CardTitle className="flex items-center gap-2">
                 <Lock className="w-5 h-5" />
                 Stake PULSE
+                <TierRequirementsPopover align="end" iconClassName="w-4 h-4 text-muted-foreground" />
               </CardTitle>
               <CardDescription>
                 Lock your PULSE to boost your tier
