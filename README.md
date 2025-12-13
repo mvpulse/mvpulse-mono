@@ -10,7 +10,8 @@ mvpulse/
 └── contracts/         # Move smart contracts
     ├── pulse/         # PULSE token (Fungible Asset)
     ├── poll/          # Polling system with rewards
-    └── swap/          # PULSE/USDC AMM swap
+    ├── swap/          # PULSE/USDC AMM swap
+    └── staking/       # PULSE staking for tier qualification
 ```
 
 ## Deployed Contracts (Testnet)
@@ -20,6 +21,7 @@ mvpulse/
 | **pulse** | `0x69c7c6752b3426e00fec646270e5b7e9f0efa18bddbd7f112a8e84f7fbe3f737` | `pulse::pulse` |
 | **poll** | `0x306980d338caa4537e109afdc15f7f749b5948c9e69ec0178a7527363cdca70e` | `poll::poll` |
 | **swap** | `0x55872704413ffc43bb832df7eb14c0665c9ae401897077a262d56e2de37d2b7e` | `swap::swap` |
+| **staking** | `0xa317fa282be3423cd8378b818f04ba9492981d955206ed2a46eff281be8aa55f` | `staking::staking` |
 
 ## Features
 
@@ -38,6 +40,26 @@ mvpulse/
 - AMM-based PULSE/USDC swap
 - Constant product (x*y=k) market maker
 - Liquidity provision with LP shares
+
+### PULSE Staking
+- Lock PULSE tokens for fixed periods (7, 14, 21, 30, 90, 180, or 365 days)
+- Staking counts towards tier qualification (wallet balance + staked = tier)
+- Multiple stake positions with different lock periods
+- Unstake anytime after lock period expires
+
+### Tier System
+Users earn tiers based on their total PULSE holdings (wallet + staked):
+
+| Tier | PULSE Required | Daily Votes |
+|------|----------------|-------------|
+| Bronze | 0+ | 3 |
+| Silver | 1,000+ | 6 |
+| Gold | 10,000+ | 9 |
+| Platinum | 100,000+ | 12 |
+
+**Streak Bonuses:**
+- 7+ day voting streak: +1 tier
+- 30+ day voting streak: +2 tiers (max Platinum)
 
 ## Frontend
 
@@ -60,6 +82,9 @@ The app will be available at `http://localhost:5173`.
 - PULSE faucet for testnet
 - Poll creation and voting
 - Token swap interface
+- PULSE staking dashboard with tier progression
+- Tier requirements popover with voting limits info
+- Gas sponsorship via Shinami (optional)
 
 ### Environment Variables
 
@@ -70,10 +95,15 @@ Create a `.env` file in the `frontend/` directory:
 VITE_TESTNET_CONTRACT_ADDRESS=0x306980d338caa4537e109afdc15f7f749b5948c9e69ec0178a7527363cdca70e
 VITE_TESTNET_PULSE_CONTRACT_ADDRESS=0x69c7c6752b3426e00fec646270e5b7e9f0efa18bddbd7f112a8e84f7fbe3f737
 VITE_TESTNET_SWAP_CONTRACT_ADDRESS=0x55872704413ffc43bb832df7eb14c0665c9ae401897077a262d56e2de37d2b7e
+VITE_TESTNET_STAKING_CONTRACT_ADDRESS=0xa317fa282be3423cd8378b818f04ba9492981d955206ed2a46eff281be8aa55f
 VITE_TESTNET_USDC_CONTRACT_ADDRESS=0xb89077cfd2a82a0c1450534d49cfd5f2707643155273069bc23a912bcfefdee7
 
 # Privy (optional)
 VITE_PRIVY_APP_ID=your_privy_app_id
+
+# Shinami Gas Sponsorship (optional)
+SHINAMI_GAS_KEY_TESTNET=your_shinami_testnet_key
+SHINAMI_GAS_KEY_MAINNET=your_shinami_mainnet_key
 ```
 
 ## Contracts
@@ -87,11 +117,13 @@ See [contracts/README.md](contracts/README.md) for detailed contract documentati
 cd contracts/pulse && movement move compile
 cd contracts/poll && movement move compile
 cd contracts/swap && movement move compile
+cd contracts/staking && movement move compile
 
 # Deploy (requires funded account)
 cd contracts/pulse && movement move publish --assume-yes
 cd contracts/poll && movement move publish --assume-yes
 cd contracts/swap && movement move publish --assume-yes
+cd contracts/staking && movement move publish --assume-yes
 ```
 
 ## Networks
