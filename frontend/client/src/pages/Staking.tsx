@@ -95,6 +95,16 @@ export default function StakingPage() {
   const pulseBalance = balances?.[COIN_TYPES.PULSE]?.balance ?? 0;
   const pulseBalanceFormatted = balances?.[COIN_TYPES.PULSE]?.balanceFormatted ?? "0.0000";
 
+  // Auto-sync tier when page loads with fresh balance/staking data
+  useEffect(() => {
+    if (address && !isLoading && !isLoadingBalance && balances !== null) {
+      syncTier({
+        pulseBalance: pulseBalance.toString(),
+        stakedAmount: totalStaked.toString()
+      });
+    }
+  }, [address, isLoading, isLoadingBalance, balances, pulseBalance, totalStaked, syncTier]);
+
   // Calculate tier with potential new stake
   const calculatePotentialTier = (additionalStake: number) => {
     const currentTotalPulse = pulseBalance + totalStaked;

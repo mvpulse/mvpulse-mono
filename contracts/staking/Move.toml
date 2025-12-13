@@ -4,7 +4,7 @@ version = "1.0.0"
 authors = []
 
 [addresses]
-staking = "_"
+staking = "0xa317fa282be3423cd8378b818f04ba9492981d955206ed2a46eff281be8aa55f"
 pulse = "0x69c7c6752b3426e00fec646270e5b7e9f0efa18bddbd7f112a8e84f7fbe3f737"
 
 [dev-addresses]
