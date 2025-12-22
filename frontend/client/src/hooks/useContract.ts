@@ -49,8 +49,10 @@ export function useContract() {
 
   // Helper to enrich poll with computed fields
   const enrichPoll = useCallback((poll: Poll): PollWithMeta => {
-    const totalVotes = poll.votes.reduce((sum, v) => sum + v, 0);
-    const votePercentages = poll.votes.map((v) =>
+    // Ensure votes are numbers (blockchain may return strings)
+    const numericVotes = poll.votes.map(v => Number(v));
+    const totalVotes = numericVotes.reduce((sum, v) => sum + v, 0);
+    const votePercentages = numericVotes.map((v) =>
       totalVotes > 0 ? Math.round((v / totalVotes) * 100) : 0
     );
     return {
