@@ -18,6 +18,8 @@ import {
   Wallet,
   MoreHorizontal,
   Loader2,
+  CheckCircle2,
+  Flag,
 } from "lucide-react";
 import { getCoinSymbol, type CoinTypeId } from "@/lib/tokens";
 import {
@@ -47,7 +49,7 @@ import { showTransactionSuccessToast, showTransactionErrorToast } from "@/lib/tr
 
 export default function ManagePolls() {
   const { isConnected, address } = useWalletConnection();
-  const { getAllPolls, closePoll, distributeRewards, withdrawRemaining, contractAddress } = useContract();
+  const { getAllPolls, closePoll, distributeRewards, withdrawRemaining, finalizePoll, canFinalizePoll, contractAddress } = useContract();
   const { config } = useNetwork();
 
   const [polls, setPolls] = useState<PollWithMeta[]>([]);
@@ -62,6 +64,7 @@ export default function ManagePolls() {
   });
   const [selectedDistributionMode, setSelectedDistributionMode] = useState<number>(DISTRIBUTION_MODE.MANUAL_PULL as number);
   const [actionLoading, setActionLoading] = useState<{ type: string; pollId: number } | null>(null);
+  const [finalizablePolls, setFinalizablePolls] = useState<Set<number>>(new Set());
 
   // Fetch polls
   const fetchPolls = useCallback(async () => {
@@ -74,12 +77,23 @@ export default function ManagePolls() {
     try {
       const allPolls = await getAllPolls();
       setPolls(allPolls.sort((a, b) => b.id - a.id));
+
+      // Check which CLAIMING polls can be finalized
+      const claimingPolls = allPolls.filter(p => p.status === POLL_STATUS.CLAIMING);
+      const finalizableSet = new Set<number>();
+      for (const poll of claimingPolls) {
+        const canFinalize = await canFinalizePoll(poll.id);
+        if (canFinalize) {
+          finalizableSet.add(poll.id);
+        }
+      }
+      setFinalizablePolls(finalizableSet);
     } catch (error) {
       console.error("Failed to fetch polls:", error);
     } finally {
       setIsLoading(false);
     }
-  }, [getAllPolls, contractAddress]);
+  }, [getAllPolls, canFinalizePoll, contractAddress]);
 
   useEffect(() => {
     fetchPolls();
@@ -104,6 +118,8 @@ export default function ManagePolls() {
       filtered = filtered.filter((p) => p.status === POLL_STATUS.CLOSED);
     } else if (activeTab === "claiming") {
       filtered = filtered.filter((p) => p.status === POLL_STATUS.CLAIMING);
+    } else if (activeTab === "finalized") {
+      filtered = filtered.filter((p) => p.status === POLL_STATUS.FINALIZED);
     }
 
     // Filter by search
@@ -146,10 +162,10 @@ export default function ManagePolls() {
   };
 
   // Handle distribute rewards
-  const handleDistribute = async (pollId: number) => {
+  const handleDistribute = async (pollId: number, coinTypeId: CoinTypeId) => {
     setActionLoading({ type: "distribute", pollId });
     try {
-      const result = await distributeRewards(pollId);
+      const result = await distributeRewards(pollId, coinTypeId);
       showTransactionSuccessToast(
         result.hash,
         "Rewards Distributed!",
@@ -167,10 +183,10 @@ export default function ManagePolls() {
   };
 
   // Handle withdraw remaining
-  const handleWithdraw = async (pollId: number) => {
+  const handleWithdraw = async (pollId: number, coinTypeId: CoinTypeId) => {
     setActionLoading({ type: "withdraw", pollId });
     try {
-      const result = await withdrawRemaining(pollId);
+      const result = await withdrawRemaining(pollId, coinTypeId);
       showTransactionSuccessToast(
         result.hash,
         "Funds Withdrawn!",
@@ -187,6 +203,27 @@ export default function ManagePolls() {
     }
   };
 
+  // Handle finalize poll
+  const handleFinalize = async (pollId: number, coinTypeId: CoinTypeId) => {
+    setActionLoading({ type: "finalize", pollId });
+    try {
+      const result = await finalizePoll(pollId, coinTypeId);
+      showTransactionSuccessToast(
+        result.hash,
+        "Poll Finalized!",
+        "Unclaimed rewards have been sent to the treasury.",
+        config.explorerUrl,
+        result.sponsored
+      );
+      await fetchPolls();
+    } catch (error) {
+      console.error("Failed to finalize:", error);
+      showTransactionErrorToast("Failed to finalize poll", error instanceof Error ? error : "Transaction failed");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   // Get status badge
   const getStatusBadge = (poll: PollWithMeta) => {
     switch (poll.status) {
@@ -196,6 +233,8 @@ export default function ManagePolls() {
         return <Badge className="bg-yellow-500/20 text-yellow-500 border-yellow-500/50">Claiming</Badge>;
       case POLL_STATUS.CLOSED:
         return <Badge variant="secondary">Closed</Badge>;
+      case POLL_STATUS.FINALIZED:
+        return <Badge className="bg-blue-500/20 text-blue-500 border-blue-500/50">Finalized</Badge>;
       default:
         return <Badge variant="secondary">Unknown</Badge>;
     }
@@ -266,6 +305,9 @@ export default function ManagePolls() {
           </TabsTrigger>
           <TabsTrigger value="closed">
             Closed ({myPolls.filter((p) => p.status === POLL_STATUS.CLOSED).length})
+          </TabsTrigger>
+          <TabsTrigger value="finalized">
+            Finalized ({myPolls.filter((p) => p.status === POLL_STATUS.FINALIZED).length})
           </TabsTrigger>
         </TabsList>
 
@@ -353,16 +395,28 @@ export default function ManagePolls() {
                             {poll.status === POLL_STATUS.CLOSED &&
                               poll.distribution_mode === DISTRIBUTION_MODE.MANUAL_PUSH &&
                               !poll.rewards_distributed && (
-                                <DropdownMenuItem onClick={() => handleDistribute(poll.id)}>
+                                <DropdownMenuItem onClick={() => handleDistribute(poll.id, poll.coin_type_id as CoinTypeId)}>
                                   <Send className="w-4 h-4 mr-2" /> Distribute Rewards
                                 </DropdownMenuItem>
                               )}
                             {(poll.status === POLL_STATUS.CLOSED || poll.status === POLL_STATUS.CLAIMING) &&
                               poll.reward_pool > 0 && (
-                                <DropdownMenuItem onClick={() => handleWithdraw(poll.id)}>
+                                <DropdownMenuItem onClick={() => handleWithdraw(poll.id, poll.coin_type_id as CoinTypeId)}>
                                   <Wallet className="w-4 h-4 mr-2" /> Withdraw Remaining
                                 </DropdownMenuItem>
                               )}
+                            {/* Finalize poll (CLAIMING polls with elapsed claim period) */}
+                            {poll.status === POLL_STATUS.CLAIMING && finalizablePolls.has(poll.id) && (
+                              <DropdownMenuItem onClick={() => handleFinalize(poll.id, poll.coin_type_id as CoinTypeId)}>
+                                <Flag className="w-4 h-4 mr-2" /> Finalize Poll
+                              </DropdownMenuItem>
+                            )}
+                            {/* Show status for claiming polls with no funds */}
+                            {poll.status === POLL_STATUS.CLAIMING && poll.reward_pool === 0 && !finalizablePolls.has(poll.id) && (
+                              <DropdownMenuItem disabled className="text-muted-foreground">
+                                <CheckCircle2 className="w-4 h-4 mr-2" /> All Rewards Claimed
+                              </DropdownMenuItem>
+                            )}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>

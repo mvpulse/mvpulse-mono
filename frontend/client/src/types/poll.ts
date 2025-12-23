@@ -5,6 +5,7 @@ export const POLL_STATUS = {
   ACTIVE: 0,
   CLOSED: 1,
   CLAIMING: 2, // For Manual Pull - participants can claim rewards
+  FINALIZED: 3, // Poll finalized, no more claims allowed
 } as const;
 
 // Distribution mode constants
@@ -47,6 +48,7 @@ export interface Poll {
   end_time: number;
   status: number;
   coin_type_id: number;           // 0 = MOVE, 1 = PULSE
+  closed_at: number;              // Timestamp when poll entered CLAIMING status (0 if not closed)
 }
 
 // Poll with computed fields for UI
@@ -90,9 +92,10 @@ export interface ContractError {
 
 // Platform config (from contract view function)
 export interface PlatformConfig {
-  feeBps: number;           // Fee in basis points (100 = 1%)
-  treasury: string;         // Treasury address
+  feeBps: number;             // Fee in basis points (100 = 1%)
+  treasury: string;           // Treasury address
   totalFeesCollected: number; // Total fees collected (in octas)
+  claimPeriodSecs: number;    // Time period for claiming rewards (in seconds)
 }
 
 // Helper functions for fee calculations

@@ -115,10 +115,10 @@ export default function Distributions() {
   }, [pendingDistributions, myPolls]);
 
   // Handle distribute rewards
-  const handleDistribute = async (pollId: number) => {
+  const handleDistribute = async (pollId: number, coinTypeId: CoinTypeId) => {
     setDistributingPollId(pollId);
     try {
-      const result = await distributeRewards(pollId);
+      const result = await distributeRewards(pollId, coinTypeId);
       showTransactionSuccessToast(
         result.hash,
         "Rewards Distributed!",
@@ -278,7 +278,7 @@ export default function Distributions() {
                       </p>
                     </div>
                     <Button
-                      onClick={() => handleDistribute(poll.id)}
+                      onClick={() => handleDistribute(poll.id, poll.coin_type_id as CoinTypeId)}
                       disabled={distributingPollId === poll.id}
                     >
                       {distributingPollId === poll.id ? (

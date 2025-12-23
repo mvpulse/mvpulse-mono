@@ -302,6 +302,33 @@ export function useContract() {
     [executeTransaction, contractAddress]
   );
 
+  // Finalize a poll (after claim period, sends unclaimed rewards to treasury)
+  const finalizePoll = useCallback(
+    async (pollId: number, coinTypeId: CoinTypeId = COIN_TYPES.MOVE): Promise<TransactionResult> => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const functionName = coinTypeId === COIN_TYPES.PULSE
+          ? "finalize_poll_pulse"
+          : "finalize_poll_move";
+
+        return await executeTransaction(
+          functionName,
+          [contractAddress, pollId.toString()],
+          "Failed to finalize poll"
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to finalize poll";
+        setError(message);
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [executeTransaction, contractAddress]
+  );
+
   // Vote on a poll
   const vote = useCallback(
     async (input: VoteInput): Promise<TransactionResult> => {
@@ -454,6 +481,52 @@ export function useContract() {
     [client, contractAddress, activeAddress]
   );
 
+  // Get claim period in seconds (view function)
+  const getClaimPeriod = useCallback(async (): Promise<number> => {
+    if (!contractAddress) return 0;
+
+    try {
+      const result = await client.view({
+        payload: {
+          function: getFunctionId(contractAddress, "get_claim_period"),
+          typeArguments: [],
+          functionArguments: [contractAddress],
+        },
+      });
+
+      if (result && result[0] !== undefined) {
+        return Number(result[0]);
+      }
+      return 0;
+    } catch (err) {
+      console.error("Failed to get claim period:", err);
+      return 0;
+    }
+  }, [client, contractAddress]);
+
+  // Check if a poll can be finalized (view function)
+  const canFinalizePoll = useCallback(
+    async (pollId: number): Promise<boolean> => {
+      if (!contractAddress) return false;
+
+      try {
+        const result = await client.view({
+          payload: {
+            function: getFunctionId(contractAddress, "can_finalize_poll"),
+            typeArguments: [],
+            functionArguments: [contractAddress, pollId.toString()],
+          },
+        });
+
+        return Boolean(result && result[0]);
+      } catch (err) {
+        console.error("Failed to check if poll can be finalized:", err);
+        return false;
+      }
+    },
+    [client, contractAddress]
+  );
+
   // Get all polls (fetches each poll individually)
   const getAllPolls = useCallback(async (): Promise<PollWithMeta[]> => {
     const count = await getPollCount();
@@ -488,6 +561,7 @@ export function useContract() {
           feeBps: Number(result[0]),
           treasury: String(result[1]),
           totalFeesCollected: Number(result[2]),
+          claimPeriodSecs: result.length >= 4 ? Number(result[3]) : 604800, // Default 7 days
         };
       }
       return null;
@@ -514,6 +588,7 @@ export function useContract() {
     claimReward,
     distributeRewards,
     withdrawRemaining,
+    finalizePoll,
 
     // Read functions
     getPoll,
@@ -522,6 +597,8 @@ export function useContract() {
     hasClaimed,
     getAllPolls,
     getPlatformConfig,
+    getClaimPeriod,
+    canFinalizePoll,
 
     // Helpers
     enrichPoll,

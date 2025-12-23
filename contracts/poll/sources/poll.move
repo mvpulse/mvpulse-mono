@@ -34,11 +34,15 @@ module poll::poll {
     const E_DISTRIBUTION_MODE_NOT_SET: u64 = 17;
     const E_INVALID_COIN_TYPE: u64 = 18;
     const E_COIN_TYPE_MISMATCH: u64 = 19;
+    const E_CLAIM_PERIOD_NOT_ELAPSED: u64 = 20;
+    const E_POLL_ALREADY_FINALIZED: u64 = 21;
+    const E_POLL_NOT_IN_CLAIMING: u64 = 22;
 
     /// Poll status
     const STATUS_ACTIVE: u8 = 0;
     const STATUS_CLOSED: u8 = 1;
     const STATUS_CLAIMING: u8 = 2;  // For Manual Pull - participants can claim rewards
+    const STATUS_FINALIZED: u8 = 3; // Poll is finalized, no more claims allowed
 
     /// Distribution modes
     const DISTRIBUTION_UNSET: u8 = 255;       // Not yet selected
@@ -52,6 +56,9 @@ module poll::poll {
     /// Fee constants
     const MAX_FEE_BPS: u64 = 1000;  // Max 10% fee
     const DEFAULT_FEE_BPS: u64 = 200;  // Default 2% fee
+
+    /// Claim period constants
+    const DEFAULT_CLAIM_PERIOD_SECS: u64 = 604800;  // Default 7 days in seconds
 
     /// Represents a single poll
     struct Poll has store, drop, copy {
@@ -71,6 +78,7 @@ module poll::poll {
         end_time: u64,
         status: u8,
         coin_type_id: u8,             // 0 = AptosCoin, 1 = PULSE
+        closed_at: u64,               // Timestamp when poll entered CLAIMING status (for claim period calculation)
     }
 
     /// Global poll registry stored at contract address
@@ -81,6 +89,7 @@ module poll::poll {
         platform_fee_bps: u64,        // Fee in basis points (100 = 1%)
         platform_treasury: address,   // Address to receive fees
         total_fees_collected: u64,    // Track total fees collected
+        claim_period_secs: u64,       // Time period for claiming rewards after poll closes
     }
 
     /// Reward vault for legacy coins (AptosCoin/MOVE)
@@ -141,6 +150,19 @@ module poll::poll {
         new_fee_bps: u64,
     }
 
+    #[event]
+    struct PollFinalized has drop, store {
+        poll_id: u64,
+        unclaimed_amount: u64,
+        sent_to_treasury: bool,
+    }
+
+    #[event]
+    struct ClaimPeriodUpdated has drop, store {
+        old_period_secs: u64,
+        new_period_secs: u64,
+    }
+
     /// Initialize the poll registry (call once when deploying)
     /// Also initializes the AptosCoin vault and PULSE FA vault
     public entry fun initialize(account: &signer) {
@@ -152,6 +174,7 @@ module poll::poll {
             platform_fee_bps: DEFAULT_FEE_BPS,
             platform_treasury: admin_addr,
             total_fees_collected: 0,
+            claim_period_secs: DEFAULT_CLAIM_PERIOD_SECS,
         };
         move_to(account, registry);
 
@@ -340,6 +363,7 @@ module poll::poll {
             end_time: timestamp::now_seconds() + duration_secs,
             status: STATUS_ACTIVE,
             coin_type_id,
+            closed_at: 0,
         };
 
         vector::push_back(&mut registry.polls, poll);
@@ -502,6 +526,9 @@ module poll::poll {
 
         // Set distribution mode
         poll.distribution_mode = distribution_mode;
+
+        // Record closed timestamp for claim period calculation
+        poll.closed_at = timestamp::now_seconds();
 
         // Set status based on distribution mode
         if (distribution_mode == DISTRIBUTION_MANUAL_PULL) {
@@ -782,7 +809,9 @@ module poll::poll {
         });
     }
 
-    /// Withdraw remaining MOVE funds from a poll (only creator, only after distribution)
+    /// Withdraw excess MOVE funds from a poll (only creator, only after poll closed)
+    /// For CLAIMING status: only withdraws excess beyond what's owed to unclaimed voters
+    /// For CLOSED/FINALIZED status: withdraws all remaining funds
     public entry fun withdraw_remaining_move(
         account: &signer,
         registry_addr: address,
@@ -798,16 +827,37 @@ module poll::poll {
         assert!(poll.coin_type_id == COIN_TYPE_APTOS, E_COIN_TYPE_MISMATCH);
         assert!(poll.status != STATUS_ACTIVE, E_POLL_NOT_ENDED);
 
-        let remaining = poll.reward_pool;
-        if (remaining > 0) {
+        // Calculate withdrawable amount
+        let withdrawable = if (poll.status == STATUS_CLAIMING && poll.reward_per_vote > 0) {
+            // For CLAIMING status with fixed rewards: only withdraw excess
+            let total_voters = vector::length(&poll.voters);
+            let claimed_count = vector::length(&poll.claimed);
+            let unclaimed_count = total_voters - claimed_count;
+            let owed_to_unclaimed = (unclaimed_count as u64) * poll.reward_per_vote;
+            if (poll.reward_pool > owed_to_unclaimed) {
+                poll.reward_pool - owed_to_unclaimed
+            } else {
+                0
+            }
+        } else if (poll.status == STATUS_CLAIMING) {
+            // For CLAIMING status with equal split: no excess, all goes to voters
+            0
+        } else {
+            // For CLOSED or FINALIZED: can withdraw all remaining
+            poll.reward_pool
+        };
+
+        if (withdrawable > 0) {
             let vault = borrow_global_mut<RewardVault<AptosCoin>>(registry_addr);
-            let coins = coin::extract(&mut vault.coins, remaining);
+            let coins = coin::extract(&mut vault.coins, withdrawable);
             coin::deposit(caller, coins);
-            poll.reward_pool = 0;
+            poll.reward_pool = poll.reward_pool - withdrawable;
         };
     }
 
-    /// Withdraw remaining PULSE funds from a poll (only creator, only after distribution)
+    /// Withdraw excess PULSE funds from a poll (only creator, only after poll closed)
+    /// For CLAIMING status: only withdraws excess beyond what's owed to unclaimed voters
+    /// For CLOSED/FINALIZED status: withdraws all remaining funds
     public entry fun withdraw_remaining_pulse(
         account: &signer,
         registry_addr: address,
@@ -823,14 +873,32 @@ module poll::poll {
         assert!(poll.coin_type_id == COIN_TYPE_PULSE, E_COIN_TYPE_MISMATCH);
         assert!(poll.status != STATUS_ACTIVE, E_POLL_NOT_ENDED);
 
-        let remaining = poll.reward_pool;
-        if (remaining > 0) {
+        // Calculate withdrawable amount
+        let withdrawable = if (poll.status == STATUS_CLAIMING && poll.reward_per_vote > 0) {
+            // For CLAIMING status with fixed rewards: only withdraw excess
+            let total_voters = vector::length(&poll.voters);
+            let claimed_count = vector::length(&poll.claimed);
+            let unclaimed_count = total_voters - claimed_count;
+            let owed_to_unclaimed = (unclaimed_count as u64) * poll.reward_per_vote;
+            if (poll.reward_pool > owed_to_unclaimed) {
+                poll.reward_pool - owed_to_unclaimed
+            } else {
+                0
+            }
+        } else if (poll.status == STATUS_CLAIMING) {
+            // For CLAIMING status with equal split: no excess, all goes to voters
+            0
+        } else {
+            // For CLOSED or FINALIZED: can withdraw all remaining
+            poll.reward_pool
+        };
+
+        if (withdrawable > 0) {
             let fa_vault = borrow_global<FARewardVault>(registry_addr);
-            // Use extend_ref to generate signer for withdrawal
             let vault_signer = object::generate_signer_for_extending(&fa_vault.extend_ref);
-            let fa = fungible_asset::withdraw(&vault_signer, fa_vault.pulse_store, remaining);
+            let fa = fungible_asset::withdraw(&vault_signer, fa_vault.pulse_store, withdrawable);
             primary_fungible_store::deposit(caller, fa);
-            poll.reward_pool = 0;
+            poll.reward_pool = poll.reward_pool - withdrawable;
         };
     }
 
@@ -879,6 +947,119 @@ module poll::poll {
 
         assert!(caller == registry.admin, E_NOT_ADMIN);
         registry.admin = new_admin;
+    }
+
+    /// Set claim period (only admin)
+    public entry fun set_claim_period(
+        account: &signer,
+        registry_addr: address,
+        claim_period_secs: u64,
+    ) acquires PollRegistry {
+        let caller = signer::address_of(account);
+        let registry = borrow_global_mut<PollRegistry>(registry_addr);
+
+        assert!(caller == registry.admin, E_NOT_ADMIN);
+
+        let old_period = registry.claim_period_secs;
+        registry.claim_period_secs = claim_period_secs;
+
+        event::emit(ClaimPeriodUpdated {
+            old_period_secs: old_period,
+            new_period_secs: claim_period_secs,
+        });
+    }
+
+    /// Finalize a CLAIMING poll with MOVE rewards
+    /// Can only be called after claim period has elapsed
+    /// Unclaimed rewards are sent to treasury
+    public entry fun finalize_poll_move(
+        account: &signer,
+        registry_addr: address,
+        poll_id: u64,
+    ) acquires PollRegistry, RewardVault {
+        let caller = signer::address_of(account);
+        let registry = borrow_global_mut<PollRegistry>(registry_addr);
+
+        assert!(poll_id < vector::length(&registry.polls), E_POLL_NOT_FOUND);
+
+        let poll = vector::borrow_mut(&mut registry.polls, poll_id);
+        assert!(poll.creator == caller, E_NOT_OWNER);
+        assert!(poll.coin_type_id == COIN_TYPE_APTOS, E_COIN_TYPE_MISMATCH);
+        assert!(poll.status == STATUS_CLAIMING, E_POLL_NOT_IN_CLAIMING);
+        assert!(poll.status != STATUS_FINALIZED, E_POLL_ALREADY_FINALIZED);
+
+        // Check claim period has elapsed
+        let current_time = timestamp::now_seconds();
+        let claim_deadline = poll.closed_at + registry.claim_period_secs;
+        assert!(current_time >= claim_deadline, E_CLAIM_PERIOD_NOT_ELAPSED);
+
+        let unclaimed_amount = poll.reward_pool;
+        let sent_to_treasury = false;
+
+        // Send unclaimed rewards to treasury
+        if (unclaimed_amount > 0) {
+            let vault = borrow_global_mut<RewardVault<AptosCoin>>(registry_addr);
+            let coins = coin::extract(&mut vault.coins, unclaimed_amount);
+            coin::deposit(registry.platform_treasury, coins);
+            poll.reward_pool = 0;
+            sent_to_treasury = true;
+        };
+
+        // Mark poll as finalized
+        poll.status = STATUS_FINALIZED;
+
+        event::emit(PollFinalized {
+            poll_id,
+            unclaimed_amount,
+            sent_to_treasury,
+        });
+    }
+
+    /// Finalize a CLAIMING poll with PULSE rewards
+    /// Can only be called after claim period has elapsed
+    /// Unclaimed rewards are sent to treasury
+    public entry fun finalize_poll_pulse(
+        account: &signer,
+        registry_addr: address,
+        poll_id: u64,
+    ) acquires PollRegistry, FARewardVault {
+        let caller = signer::address_of(account);
+        let registry = borrow_global_mut<PollRegistry>(registry_addr);
+
+        assert!(poll_id < vector::length(&registry.polls), E_POLL_NOT_FOUND);
+
+        let poll = vector::borrow_mut(&mut registry.polls, poll_id);
+        assert!(poll.creator == caller, E_NOT_OWNER);
+        assert!(poll.coin_type_id == COIN_TYPE_PULSE, E_COIN_TYPE_MISMATCH);
+        assert!(poll.status == STATUS_CLAIMING, E_POLL_NOT_IN_CLAIMING);
+        assert!(poll.status != STATUS_FINALIZED, E_POLL_ALREADY_FINALIZED);
+
+        // Check claim period has elapsed
+        let current_time = timestamp::now_seconds();
+        let claim_deadline = poll.closed_at + registry.claim_period_secs;
+        assert!(current_time >= claim_deadline, E_CLAIM_PERIOD_NOT_ELAPSED);
+
+        let unclaimed_amount = poll.reward_pool;
+        let sent_to_treasury = false;
+
+        // Send unclaimed rewards to treasury
+        if (unclaimed_amount > 0) {
+            let fa_vault = borrow_global<FARewardVault>(registry_addr);
+            let vault_signer = object::generate_signer_for_extending(&fa_vault.extend_ref);
+            let fa = fungible_asset::withdraw(&vault_signer, fa_vault.pulse_store, unclaimed_amount);
+            primary_fungible_store::deposit(registry.platform_treasury, fa);
+            poll.reward_pool = 0;
+            sent_to_treasury = true;
+        };
+
+        // Mark poll as finalized
+        poll.status = STATUS_FINALIZED;
+
+        event::emit(PollFinalized {
+            poll_id,
+            unclaimed_amount,
+            sent_to_treasury,
+        });
     }
 
     #[view]
@@ -934,8 +1115,32 @@ module poll::poll {
 
     #[view]
     /// View function to get platform configuration
-    public fun get_platform_config(registry_addr: address): (u64, address, u64) acquires PollRegistry {
+    /// Returns: (fee_bps, treasury, total_fees_collected, claim_period_secs)
+    public fun get_platform_config(registry_addr: address): (u64, address, u64, u64) acquires PollRegistry {
         let registry = borrow_global<PollRegistry>(registry_addr);
-        (registry.platform_fee_bps, registry.platform_treasury, registry.total_fees_collected)
+        (registry.platform_fee_bps, registry.platform_treasury, registry.total_fees_collected, registry.claim_period_secs)
+    }
+
+    #[view]
+    /// View function to get claim period in seconds
+    public fun get_claim_period(registry_addr: address): u64 acquires PollRegistry {
+        let registry = borrow_global<PollRegistry>(registry_addr);
+        registry.claim_period_secs
+    }
+
+    #[view]
+    /// View function to check if poll can be finalized (claim period elapsed)
+    public fun can_finalize_poll(registry_addr: address, poll_id: u64): bool acquires PollRegistry {
+        let registry = borrow_global<PollRegistry>(registry_addr);
+        assert!(poll_id < vector::length(&registry.polls), E_POLL_NOT_FOUND);
+
+        let poll = vector::borrow(&registry.polls, poll_id);
+        if (poll.status != STATUS_CLAIMING) {
+            return false
+        };
+
+        let current_time = timestamp::now_seconds();
+        let claim_deadline = poll.closed_at + registry.claim_period_secs;
+        current_time >= claim_deadline
     }
 }
