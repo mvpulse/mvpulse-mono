@@ -10,6 +10,7 @@ import {
   type TransactionData,
 } from "@/lib/sponsored-transactions";
 import { CoinTypeId, COIN_TYPES } from "@/lib/tokens";
+import { isIndexerOptimizationEnabled } from "@/lib/feature-flags";
 import type { Poll, PollWithMeta, CreatePollInput, VoteInput, TransactionResult, PlatformConfig } from "@/types/poll";
 
 // Extended transaction result with sponsorship info
@@ -527,11 +528,19 @@ export function useContract() {
     [client, contractAddress]
   );
 
-  // Get all polls (fetches each poll individually)
+  // Get all polls (parallel or sequential based on feature flag)
   const getAllPolls = useCallback(async (): Promise<PollWithMeta[]> => {
     const count = await getPollCount();
     if (count === 0) return [];
 
+    // Use parallel fetching when indexer optimization is enabled
+    if (isIndexerOptimizationEnabled()) {
+      const pollPromises = Array.from({ length: count }, (_, i) => getPoll(i));
+      const results = await Promise.all(pollPromises);
+      return results.filter((poll): poll is PollWithMeta => poll !== null);
+    }
+
+    // Sequential fetching (original behavior)
     const polls: PollWithMeta[] = [];
     for (let i = 0; i < count; i++) {
       const poll = await getPoll(i);

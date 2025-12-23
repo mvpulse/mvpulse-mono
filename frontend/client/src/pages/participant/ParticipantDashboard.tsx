@@ -19,6 +19,9 @@ import {
 } from "lucide-react";
 import { useContract } from "@/hooks/useContract";
 import { useWalletConnection } from "@/hooks/useWalletConnection";
+import { usePolls } from "@/hooks/usePolls";
+import { useUserPollStatus } from "@/hooks/useUserPollStatus";
+import { isIndexerOptimizationEnabled } from "@/lib/feature-flags";
 import type { PollWithMeta } from "@/types/poll";
 import { POLL_STATUS, DISTRIBUTION_MODE } from "@/types/poll";
 import { COIN_TYPES, getCoinSymbol, type CoinTypeId } from "@/lib/tokens";
@@ -27,54 +30,70 @@ import { showTransactionSuccessToast, showTransactionErrorToast } from "@/lib/tr
 
 export default function ParticipantDashboard() {
   const { isConnected, address } = useWalletConnection();
-  const { getAllPolls, hasVoted, hasClaimed, claimReward, contractAddress } = useContract();
+  const { hasVoted, hasClaimed, claimReward, contractAddress } = useContract();
   const { config } = useNetwork();
 
-  const [polls, setPolls] = useState<PollWithMeta[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [votedPollIds, setVotedPollIds] = useState<Set<number>>(new Set());
-  const [claimedPollIds, setClaimedPollIds] = useState<Set<number>>(new Set());
+  // Use optimized hooks when feature flag is enabled
+  const { polls: cachedPolls, isLoading: pollsLoading, refresh: refreshPolls } = usePolls();
+  const { votedPolls: indexedVotedPolls, claimedPolls: indexedClaimedPolls, isOptimized } = useUserPollStatus(address ?? undefined);
+
+  // Local state for RPC-based status (fallback when optimization is disabled)
+  const [rpcVotedPollIds, setRpcVotedPollIds] = useState<Set<number>>(new Set());
+  const [rpcClaimedPollIds, setRpcClaimedPollIds] = useState<Set<number>>(new Set());
+  const [isRpcStatusLoading, setIsRpcStatusLoading] = useState(false);
   const [claimingPollId, setClaimingPollId] = useState<number | null>(null);
 
-  // Fetch polls and vote status
-  const fetchPolls = useCallback(async () => {
-    if (!contractAddress) {
-      setIsLoading(false);
-      return;
-    }
+  // Sorted polls
+  const polls = useMemo(() => {
+    return [...cachedPolls].sort((a, b) => b.id - a.id);
+  }, [cachedPolls]);
 
-    setIsLoading(true);
+  // Use indexed data when available, fall back to RPC data
+  const votedPollIds = isOptimized ? indexedVotedPolls : rpcVotedPollIds;
+  const claimedPollIds = isOptimized ? indexedClaimedPolls : rpcClaimedPollIds;
+
+  // Fetch vote/claim status via RPC when optimization is disabled
+  const fetchRpcStatus = useCallback(async () => {
+    if (!contractAddress || !address || isOptimized) return;
+
+    setIsRpcStatusLoading(true);
     try {
-      const allPolls = await getAllPolls();
-      setPolls(allPolls.sort((a, b) => b.id - a.id));
-
-      // Check vote and claim status for each poll
-      if (address) {
-        const votedIds = new Set<number>();
-        const claimedIds = new Set<number>();
-        for (const poll of allPolls) {
-          const voted = await hasVoted(poll.id);
-          if (voted) {
-            votedIds.add(poll.id);
-            const claimed = await hasClaimed(poll.id);
-            if (claimed) {
-              claimedIds.add(poll.id);
-            }
+      const votedIds = new Set<number>();
+      const claimedIds = new Set<number>();
+      for (const poll of polls) {
+        const voted = await hasVoted(poll.id);
+        if (voted) {
+          votedIds.add(poll.id);
+          const claimed = await hasClaimed(poll.id);
+          if (claimed) {
+            claimedIds.add(poll.id);
           }
         }
-        setVotedPollIds(votedIds);
-        setClaimedPollIds(claimedIds);
       }
+      setRpcVotedPollIds(votedIds);
+      setRpcClaimedPollIds(claimedIds);
     } catch (error) {
-      console.error("Failed to fetch polls:", error);
+      console.error("Failed to fetch vote status:", error);
     } finally {
-      setIsLoading(false);
+      setIsRpcStatusLoading(false);
     }
-  }, [getAllPolls, hasVoted, hasClaimed, contractAddress, address]);
+  }, [contractAddress, address, polls, hasVoted, hasClaimed, isOptimized]);
 
   useEffect(() => {
-    fetchPolls();
-  }, [fetchPolls]);
+    if (!isOptimized && polls.length > 0 && address) {
+      fetchRpcStatus();
+    }
+  }, [isOptimized, polls.length, address, fetchRpcStatus]);
+
+  const isLoading = pollsLoading || (!isOptimized && isRpcStatusLoading);
+
+  // Refresh function
+  const fetchPolls = useCallback(async () => {
+    await refreshPolls();
+    if (!isOptimized) {
+      await fetchRpcStatus();
+    }
+  }, [refreshPolls, fetchRpcStatus, isOptimized]);
 
   // Get polls the user has voted on
   const votedPolls = useMemo(() => {
@@ -145,7 +164,7 @@ export default function ParticipantDashboard() {
         config.explorerUrl,
         result.sponsored
       );
-      setClaimedPollIds((prev) => new Set(prev).add(pollId));
+      setRpcClaimedPollIds((prev: Set<number>) => new Set(prev).add(pollId));
     } catch (error) {
       console.error("Failed to claim:", error);
       showTransactionErrorToast("Failed to claim reward", error instanceof Error ? error : "Transaction failed");

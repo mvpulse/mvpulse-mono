@@ -12,12 +12,17 @@ import {
   Info,
   Wallet,
   Network,
+  Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useWalletConnection } from "@/hooks/useWalletConnection";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { useGasSponsorship } from "@/contexts/GasSponsorshipContext";
 import { WalletSelectionModal } from "@/components/WalletSelectionModal";
+import {
+  isIndexerOptimizationEnabled,
+  setIndexerOptimizationEnabled,
+} from "@/lib/feature-flags";
 
 export default function SettingsPage() {
   const { isConnected, address, isPrivyWallet, isNativeWallet } = useWalletConnection();
@@ -31,6 +36,17 @@ export default function SettingsPage() {
   } = useGasSponsorship();
 
   const [isUpdating, setIsUpdating] = useState(false);
+  const [indexerOptEnabled, setIndexerOptEnabled] = useState(() => isIndexerOptimizationEnabled());
+
+  const handleIndexerOptToggle = (enabled: boolean) => {
+    setIndexerOptimizationEnabled(enabled);
+    setIndexerOptEnabled(enabled);
+    toast.success(
+      enabled
+        ? "Indexer optimization enabled - faster data loading!"
+        : "Indexer optimization disabled - using standard fetching"
+    );
+  };
 
   const handleSponsorshipToggle = async (enabled: boolean) => {
     setIsUpdating(true);
@@ -162,6 +178,42 @@ export default function SettingsPage() {
                 Gas sponsorship covers transaction fees on the Movement network.
                 When your daily limit is reached or sponsorship is unavailable,
                 transactions will automatically fall back to using your wallet balance.
+              </AlertDescription>
+            </Alert>
+          </CardContent>
+        </Card>
+
+        {/* Performance Optimization Card */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Zap className="w-5 h-5 text-primary" />
+              Performance Optimization
+            </CardTitle>
+            <CardDescription>
+              Use Movement Indexer for faster data retrieval
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between p-4 rounded-lg bg-muted/50 border">
+              <div className="flex-1">
+                <p className="font-medium">Enable indexer optimization</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Uses cached data and parallel fetching. Disable if experiencing issues.
+                </p>
+              </div>
+              <Switch
+                checked={indexerOptEnabled}
+                onCheckedChange={handleIndexerOptToggle}
+              />
+            </div>
+
+            <Alert>
+              <Info className="w-4 h-4" />
+              <AlertDescription className="text-sm">
+                When enabled, poll data is cached for 60 seconds and fetched in parallel
+                for faster loading. Vote and claim status checks use the Movement Indexer
+                instead of individual RPC calls.
               </AlertDescription>
             </Alert>
           </CardContent>
