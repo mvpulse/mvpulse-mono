@@ -20,6 +20,7 @@ import {
   Loader2,
   CheckCircle2,
   Flag,
+  Clock,
 } from "lucide-react";
 import { getCoinSymbol, type CoinTypeId } from "@/lib/tokens";
 import {
@@ -49,7 +50,7 @@ import { showTransactionSuccessToast, showTransactionErrorToast } from "@/lib/tr
 
 export default function ManagePolls() {
   const { isConnected, address } = useWalletConnection();
-  const { getAllPolls, closePoll, distributeRewards, withdrawRemaining, finalizePoll, canFinalizePoll, contractAddress } = useContract();
+  const { getAllPolls, startClaims, closePoll, distributeRewards, withdrawRemaining, finalizePoll, canFinalizePoll, contractAddress } = useContract();
   const { config } = useNetwork();
 
   const [polls, setPolls] = useState<PollWithMeta[]>([]);
@@ -78,10 +79,12 @@ export default function ManagePolls() {
       const allPolls = await getAllPolls();
       setPolls(allPolls.sort((a, b) => b.id - a.id));
 
-      // Check which CLAIMING polls can be finalized
-      const claimingPolls = allPolls.filter(p => p.status === POLL_STATUS.CLAIMING);
+      // Check which CLOSED polls can be finalized
+      const finalizableCandidates = allPolls.filter(
+        p => p.status === POLL_STATUS.CLOSED
+      );
       const finalizableSet = new Set<number>();
-      for (const poll of claimingPolls) {
+      for (const poll of finalizableCandidates) {
         const canFinalize = await canFinalizePoll(poll.id);
         if (canFinalize) {
           finalizableSet.add(poll.id);
@@ -135,16 +138,17 @@ export default function ManagePolls() {
     return filtered;
   }, [myPolls, activeTab, searchQuery]);
 
-  // Handle close poll
-  const handleClosePoll = async () => {
+  // Handle start claims (from ACTIVE status via modal)
+  // Transitions: ACTIVE → CLAIMING_OR_DISTRIBUTION
+  const handleStartClaims = async () => {
     if (!closePollModal.pollId) return;
 
-    setActionLoading({ type: "close", pollId: closePollModal.pollId });
+    setActionLoading({ type: "startClaims", pollId: closePollModal.pollId });
     try {
-      const result = await closePoll(closePollModal.pollId, selectedDistributionMode);
+      const result = await startClaims(closePollModal.pollId, selectedDistributionMode);
       showTransactionSuccessToast(
         result.hash,
-        "Poll Closed!",
+        "Claims Started!",
         selectedDistributionMode === DISTRIBUTION_MODE.MANUAL_PULL
           ? "Participants can now claim their rewards."
           : "You can now distribute rewards to all voters.",
@@ -152,6 +156,28 @@ export default function ManagePolls() {
         result.sponsored
       );
       setClosePollModal({ open: false, pollId: null });
+      await fetchPolls();
+    } catch (error) {
+      console.error("Failed to start claims:", error);
+      showTransactionErrorToast("Failed to start claims", error instanceof Error ? error : "Transaction failed");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  // Handle close poll (from CLAIMING_OR_DISTRIBUTION status)
+  // Transitions: CLAIMING_OR_DISTRIBUTION → CLOSED
+  const handleClosePoll = async (pollId: number) => {
+    setActionLoading({ type: "close", pollId });
+    try {
+      const result = await closePoll(pollId);
+      showTransactionSuccessToast(
+        result.hash,
+        "Poll Closed!",
+        "Claims/distributions have been stopped. You can finalize after the grace period.",
+        config.explorerUrl,
+        result.sponsored
+      );
       await fetchPolls();
     } catch (error) {
       console.error("Failed to close poll:", error);
@@ -385,36 +411,44 @@ export default function ManagePolls() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
+                            {/* ACTIVE polls: Start Claims */}
                             {poll.status === POLL_STATUS.ACTIVE && (
                               <DropdownMenuItem
                                 onClick={() => setClosePollModal({ open: true, pollId: poll.id })}
                               >
-                                <XCircle className="w-4 h-4 mr-2" /> Close Poll
+                                <XCircle className="w-4 h-4 mr-2" /> Start Claims
                               </DropdownMenuItem>
                             )}
-                            {poll.status === POLL_STATUS.CLOSED &&
+                            {/* CLAIMING polls: Distribute Rewards (MANUAL_PUSH mode) */}
+                            {poll.status === POLL_STATUS.CLAIMING &&
                               poll.distribution_mode === DISTRIBUTION_MODE.MANUAL_PUSH &&
                               !poll.rewards_distributed && (
                                 <DropdownMenuItem onClick={() => handleDistribute(poll.id, poll.coin_type_id as CoinTypeId)}>
                                   <Send className="w-4 h-4 mr-2" /> Distribute Rewards
                                 </DropdownMenuItem>
                               )}
-                            {(poll.status === POLL_STATUS.CLOSED || poll.status === POLL_STATUS.CLAIMING) &&
-                              poll.reward_pool > 0 && (
-                                <DropdownMenuItem onClick={() => handleWithdraw(poll.id, poll.coin_type_id as CoinTypeId)}>
-                                  <Wallet className="w-4 h-4 mr-2" /> Withdraw Remaining
-                                </DropdownMenuItem>
-                              )}
-                            {/* Finalize poll (CLAIMING polls with elapsed claim period) */}
-                            {poll.status === POLL_STATUS.CLAIMING && finalizablePolls.has(poll.id) && (
+                            {/* CLAIMING polls: Close Poll (stop claims/distributions) */}
+                            {poll.status === POLL_STATUS.CLAIMING && (
+                              <DropdownMenuItem onClick={() => handleClosePoll(poll.id)}>
+                                <XCircle className="w-4 h-4 mr-2" /> Close Poll
+                              </DropdownMenuItem>
+                            )}
+                            {/* CLOSED polls: Withdraw Remaining (during grace period) */}
+                            {poll.status === POLL_STATUS.CLOSED && poll.reward_pool > 0 && (
+                              <DropdownMenuItem onClick={() => handleWithdraw(poll.id, poll.coin_type_id as CoinTypeId)}>
+                                <Wallet className="w-4 h-4 mr-2" /> Withdraw Remaining
+                              </DropdownMenuItem>
+                            )}
+                            {/* CLOSED polls: Finalize Poll (when grace period elapsed) */}
+                            {poll.status === POLL_STATUS.CLOSED && finalizablePolls.has(poll.id) && (
                               <DropdownMenuItem onClick={() => handleFinalize(poll.id, poll.coin_type_id as CoinTypeId)}>
                                 <Flag className="w-4 h-4 mr-2" /> Finalize Poll
                               </DropdownMenuItem>
                             )}
-                            {/* Show status for claiming polls with no funds */}
-                            {poll.status === POLL_STATUS.CLAIMING && poll.reward_pool === 0 && !finalizablePolls.has(poll.id) && (
+                            {/* CLOSED polls: Show disabled finalize when grace period not elapsed */}
+                            {poll.status === POLL_STATUS.CLOSED && !finalizablePolls.has(poll.id) && (
                               <DropdownMenuItem disabled className="text-muted-foreground">
-                                <CheckCircle2 className="w-4 h-4 mr-2" /> All Rewards Claimed
+                                <Clock className="w-4 h-4 mr-2" /> Finalize (Grace period active)
                               </DropdownMenuItem>
                             )}
                           </DropdownMenuContent>
@@ -429,13 +463,13 @@ export default function ManagePolls() {
         </TabsContent>
       </Tabs>
 
-      {/* Close Poll Modal */}
+      {/* Start Claims Modal */}
       <Dialog open={closePollModal.open} onOpenChange={(open) => setClosePollModal({ open, pollId: open ? closePollModal.pollId : null })}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Close Poll & Select Distribution Mode</DialogTitle>
+            <DialogTitle>Start Claims & Select Distribution Mode</DialogTitle>
             <DialogDescription>
-              Choose how rewards will be distributed to voters. This cannot be changed after closing.
+              Choose how rewards will be distributed to voters. You can close the poll later to stop claims/distributions.
             </DialogDescription>
           </DialogHeader>
 
@@ -489,22 +523,22 @@ export default function ManagePolls() {
             <Button
               variant="outline"
               onClick={() => setClosePollModal({ open: false, pollId: null })}
-              disabled={actionLoading?.type === "close"}
+              disabled={actionLoading?.type === "startClaims"}
             >
               Cancel
             </Button>
             <Button
-              onClick={handleClosePoll}
-              disabled={actionLoading?.type === "close"}
-              className="bg-destructive hover:bg-destructive/90"
+              onClick={handleStartClaims}
+              disabled={actionLoading?.type === "startClaims"}
+              className="bg-primary hover:bg-primary/90"
             >
-              {actionLoading?.type === "close" ? (
+              {actionLoading?.type === "startClaims" ? (
                 <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Closing...
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Starting...
                 </>
               ) : (
                 <>
-                  <XCircle className="w-4 h-4 mr-2" /> Close Poll
+                  <CheckCircle2 className="w-4 h-4 mr-2" /> Start Claims
                 </>
               )}
             </Button>

@@ -63,7 +63,7 @@ export default function ManagePoll() {
   const { pollId: pollIdParam } = useParams();
   const [, navigate] = useLocation();
   const { isConnected, address } = useWalletConnection();
-  const { getPoll, closePoll, distributeRewards, withdrawRemaining, contractAddress } = useContract();
+  const { getPoll, startClaims, distributeRewards, withdrawRemaining, contractAddress } = useContract();
   const { config } = useNetwork();
 
   const [poll, setPoll] = useState<PollWithMeta | null>(null);
@@ -113,16 +113,16 @@ export default function ManagePoll() {
     }
   }, [isLoading, poll, isCreator, navigate]);
 
-  // Handle close poll
-  const handleClosePoll = async () => {
+  // Handle start claims
+  const handleStartClaims = async () => {
     if (pollId === null) return;
 
-    setActionLoading("close");
+    setActionLoading("startClaims");
     try {
-      const result = await closePoll(pollId, selectedDistributionMode);
+      const result = await startClaims(pollId, selectedDistributionMode);
       showTransactionSuccessToast(
         result.hash,
-        "Poll Closed!",
+        "Claims Started!",
         selectedDistributionMode === DISTRIBUTION_MODE.MANUAL_PULL
           ? "Participants can now claim their rewards."
           : "You can now distribute rewards to all voters.",
@@ -132,8 +132,8 @@ export default function ManagePoll() {
       setClosePollModal(false);
       await fetchPoll();
     } catch (error) {
-      console.error("Failed to close poll:", error);
-      showTransactionErrorToast("Failed to close poll", error instanceof Error ? error : "Transaction failed");
+      console.error("Failed to start claims:", error);
+      showTransactionErrorToast("Failed to start claims", error instanceof Error ? error : "Transaction failed");
     } finally {
       setActionLoading(null);
     }
@@ -658,22 +658,22 @@ export default function ManagePoll() {
             <Button
               variant="outline"
               onClick={() => setClosePollModal(false)}
-              disabled={actionLoading === "close"}
+              disabled={actionLoading === "startClaims"}
             >
               Cancel
             </Button>
             <Button
-              onClick={handleClosePoll}
-              disabled={actionLoading === "close"}
-              className="bg-destructive hover:bg-destructive/90"
+              onClick={handleStartClaims}
+              disabled={actionLoading === "startClaims"}
+              className="bg-primary hover:bg-primary/90"
             >
-              {actionLoading === "close" ? (
+              {actionLoading === "startClaims" ? (
                 <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Closing...
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Starting...
                 </>
               ) : (
                 <>
-                  <XCircle className="w-4 h-4 mr-2" /> Close Poll
+                  <CheckCircle2 className="w-4 h-4 mr-2" /> Start Claims
                 </>
               )}
             </Button>
