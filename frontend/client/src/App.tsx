@@ -31,6 +31,12 @@ import Rewards from "@/pages/participant/Rewards";
 import Quests from "@/pages/participant/Quests";
 import Leaderboard from "@/pages/Leaderboard";
 
+// Donor pages
+import DonorDashboard from "@/pages/donor/DonorDashboard";
+import DonorExplore from "@/pages/donor/Explore";
+import DonorFunded from "@/pages/donor/Funded";
+import DonorHistory from "@/pages/donor/History";
+
 function App() {
   return (
     <SidebarProvider>
@@ -62,6 +68,12 @@ function App() {
             <Route path="/participant/history" component={VotingHistory} />
             <Route path="/participant/rewards" component={Rewards} />
             <Route path="/leaderboard" component={Leaderboard} />
+
+            {/* Donor routes */}
+            <Route path="/donor" component={DonorDashboard} />
+            <Route path="/donor/explore" component={DonorExplore} />
+            <Route path="/donor/funded" component={DonorFunded} />
+            <Route path="/donor/history" component={DonorHistory} />
 
             <Route component={NotFound} />
           </Switch>

@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, FolderKanban, PlusCircle, Settings, Home, UserCircle, Vote, ArrowLeftRight, Wallet } from "lucide-react";
+import { LayoutDashboard, FolderKanban, PlusCircle, Settings, Home, UserCircle, Vote, ArrowLeftRight, Wallet, Heart } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
 import { NetworkSwitcher } from "./NetworkSwitcher";
 import { WalletButton } from "./WalletButton";
@@ -12,6 +12,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     { icon: Home, label: "Home", href: "/" },
     { icon: UserCircle, label: "Creator", href: "/creator" },
     { icon: Vote, label: "Participant", href: "/participant" },
+    { icon: Heart, label: "Donor", href: "/donor" },
     { icon: PlusCircle, label: "Create", href: "/create" },
     { icon: FolderKanban, label: "Projects", href: "/projects" },
     { icon: ArrowLeftRight, label: "Buy PULSE", href: "/swap" },

@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { ArrowRight, BarChart3, ShieldCheck, Zap, Users, Coins, FileCheck, Activity, CheckCircle2 } from "lucide-react";
+import { ArrowRight, BarChart3, ShieldCheck, Zap, Users, Coins, FileCheck, Activity, CheckCircle2, Heart } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { motion } from "framer-motion";
 import {
@@ -75,8 +75,8 @@ export default function Home() {
             The first incentivized polling platform on Movement. Create surveys, earn rewards, and govern communities with on-chain transparency.
           </p>
 
-          <div className="flex flex-col sm:flex-row gap-4 justify-center pt-8">
-            <Card className="p-6 w-full sm:w-80 bg-card/30 backdrop-blur-xl border-primary/20 hover:border-primary hover:bg-card/50 transition-all group cursor-pointer" onClick={() => setLocation('/dashboard?role=creator')}>
+          <div className="flex flex-col sm:flex-row flex-wrap gap-4 justify-center pt-8">
+            <Card className="p-6 w-full sm:w-72 bg-card/30 backdrop-blur-xl border-primary/20 hover:border-primary hover:bg-card/50 transition-all group cursor-pointer" onClick={() => setLocation('/creator')}>
               <div className="h-12 w-12 rounded-lg bg-primary/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
                 <BarChart3 className="w-6 h-6 text-primary" />
               </div>
@@ -87,7 +87,7 @@ export default function Home() {
               </div>
             </Card>
 
-            <Card className="p-6 w-full sm:w-80 bg-card/30 backdrop-blur-xl border-accent/20 hover:border-accent hover:bg-card/50 transition-all group cursor-pointer" onClick={() => setLocation('/dashboard?role=participant')}>
+            <Card className="p-6 w-full sm:w-72 bg-card/30 backdrop-blur-xl border-accent/20 hover:border-accent hover:bg-card/50 transition-all group cursor-pointer" onClick={() => setLocation('/participant')}>
               <div className="h-12 w-12 rounded-lg bg-accent/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
                 <Users className="w-6 h-6 text-accent" />
               </div>
@@ -95,6 +95,17 @@ export default function Home() {
               <p className="text-sm text-muted-foreground mb-4">Vote on proposals, share opinions, and earn rewards.</p>
               <div className="flex items-center text-sm font-bold text-accent">
                 Start Earning <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />
+              </div>
+            </Card>
+
+            <Card className="p-6 w-full sm:w-72 bg-card/30 backdrop-blur-xl border-pink-500/20 hover:border-pink-500 hover:bg-card/50 transition-all group cursor-pointer" onClick={() => setLocation('/donor')}>
+              <div className="h-12 w-12 rounded-lg bg-pink-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                <Heart className="w-6 h-6 text-pink-500" />
+              </div>
+              <h3 className="text-xl font-bold font-display mb-2">For Donors</h3>
+              <p className="text-sm text-muted-foreground mb-4">Fund polls, support communities, and boost rewards.</p>
+              <div className="flex items-center text-sm font-bold text-pink-500">
+                Start Funding <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />
               </div>
             </Card>
           </div>
