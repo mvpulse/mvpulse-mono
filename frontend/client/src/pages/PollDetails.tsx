@@ -38,7 +38,7 @@ export default function PollDetails() {
     hasClaimed: checkHasClaimed,
     claimReward,
     distributeRewards,
-    closePoll,
+    startClaims,
     loading: contractLoading,
   } = useContract();
   const { config } = useNetwork();
@@ -232,17 +232,17 @@ export default function PollDetails() {
     }
   };
 
-  // Handle closing poll (creator only)
-  const handleClosePoll = async () => {
+  // Handle starting claims on poll (creator only)
+  const handleStartClaims = async () => {
     if (pollId === null || !isConnected) return;
 
     setIsClosing(true);
     try {
-      const result = await closePoll(pollId, selectedDistributionMode);
+      const result = await startClaims(pollId, selectedDistributionMode);
       setIsClosePollModalOpen(false);
       showTransactionSuccessToast(
         result.hash,
-        "Poll Closed!",
+        "Claims Started!",
         selectedDistributionMode === DISTRIBUTION_MODE.MANUAL_PULL
           ? "Participants can now claim their rewards."
           : "You can now distribute rewards to all voters.",
@@ -251,8 +251,8 @@ export default function PollDetails() {
       );
       await fetchPollData();
     } catch (error) {
-      console.error("Failed to close poll:", error);
-      showTransactionErrorToast("Failed to close poll", error instanceof Error ? error : "Transaction failed");
+      console.error("Failed to start claims:", error);
+      showTransactionErrorToast("Failed to start claims", error instanceof Error ? error : "Transaction failed");
     } finally {
       setIsClosing(false);
     }
@@ -790,17 +790,17 @@ export default function PollDetails() {
               Cancel
             </Button>
             <Button
-              onClick={handleClosePoll}
+              onClick={handleStartClaims}
               disabled={isClosing || contractLoading}
-              className="bg-destructive hover:bg-destructive/90"
+              className="bg-primary hover:bg-primary/90"
             >
               {isClosing ? (
                 <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Closing...
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Starting...
                 </>
               ) : (
                 <>
-                  <XCircle className="w-4 h-4 mr-2" /> Close Poll
+                  <CheckCircle2 className="w-4 h-4 mr-2" /> Start Claims
                 </>
               )}
             </Button>

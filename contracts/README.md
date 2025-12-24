@@ -16,10 +16,14 @@ contracts/
 │   ├── Move.toml
 │   └── sources/
 │       └── poll.move
-└── swap/          # PULSE/USDC AMM swap
+├── swap/          # PULSE/USDC AMM swap
+│   ├── Move.toml
+│   └── sources/
+│       └── swap.move
+└── staking/       # PULSE staking for tier qualification
     ├── Move.toml
     └── sources/
-        └── swap.move
+        └── staking.move
 ```
 
 ## Deployed Contracts (Testnet)
@@ -27,8 +31,9 @@ contracts/
 | Package | Address | Module |
 |---------|---------|--------|
 | **pulse** | `0x69c7c6752b3426e00fec646270e5b7e9f0efa18bddbd7f112a8e84f7fbe3f737` | `pulse::pulse` |
-| **poll** | `0x306980d338caa4537e109afdc15f7f749b5948c9e69ec0178a7527363cdca70e` | `poll::poll` |
+| **poll** | `0x7da34dec279b1e7247a612d017a4b931977ce3bdcdffca54da28c508388c60de` | `poll::poll` |
 | **swap** | `0x55872704413ffc43bb832df7eb14c0665c9ae401897077a262d56e2de37d2b7e` | `swap::swap` |
+| **staking** | `0xa317fa282be3423cd8378b818f04ba9492981d955206ed2a46eff281be8aa55f` | `staking::staking` |
 
 ## Prerequisites
 
@@ -147,6 +152,21 @@ PULSE token - A Fungible Asset with fixed supply of 1 billion tokens.
 
 Polling system with MOVE and PULSE reward support.
 
+> **Note:** For detailed poll lifecycle documentation, see [poll/POLL_STATUS_WORKFLOW.md](poll/POLL_STATUS_WORKFLOW.md)
+
+### Poll Status Workflow
+
+```
+ACTIVE (0) → CLAIMING_OR_DISTRIBUTION (2) → CLOSED (1) → FINALIZED (3)
+```
+
+| Status | Value | Description |
+|--------|-------|-------------|
+| `ACTIVE` | 0 | Poll is accepting votes |
+| `CLOSED` | 1 | Claims/distributions stopped, grace period active |
+| `CLAIMING_OR_DISTRIBUTION` | 2 | Participants can claim or creator distributes rewards |
+| `FINALIZED` | 3 | Poll complete, unclaimed rewards sent to treasury |
+
 ### Entry Functions
 
 | Function | Description |
@@ -155,17 +175,21 @@ Polling system with MOVE and PULSE reward support.
 | `create_poll_with_move(...)` | Create a poll with MOVE rewards |
 | `create_poll_with_pulse(...)` | Create a poll with PULSE rewards |
 | `vote(registry, poll_id, option)` | Cast a vote on a poll |
-| `close_poll(registry, poll_id, mode)` | Close poll and set distribution mode |
-| `claim_reward_move(registry, poll_id)` | Claim MOVE reward (manual pull mode) |
-| `claim_reward_pulse(registry, poll_id)` | Claim PULSE reward (manual pull mode) |
-| `distribute_rewards_move(...)` | Push MOVE rewards to all voters |
-| `distribute_rewards_pulse(...)` | Push PULSE rewards to all voters |
+| `start_claims(registry, poll_id, distribution_mode)` | Start claiming phase (ACTIVE → CLAIMING_OR_DISTRIBUTION) |
+| `close_poll(registry, poll_id)` | Close poll and start grace period (CLAIMING_OR_DISTRIBUTION → CLOSED) |
+| `claim_reward_move(registry, poll_id)` | Claim MOVE reward (MANUAL_PULL mode) |
+| `claim_reward_pulse(registry, poll_id)` | Claim PULSE reward (MANUAL_PULL mode) |
+| `distribute_rewards_move(...)` | Push MOVE rewards to all voters (MANUAL_PUSH mode) |
+| `distribute_rewards_pulse(...)` | Push PULSE rewards to all voters (MANUAL_PUSH mode) |
 | `fund_poll_with_move(...)` | Add MOVE funds to an existing poll |
 | `fund_poll_with_pulse(...)` | Add PULSE funds to an existing poll |
-| `withdraw_remaining_move(...)` | Withdraw unclaimed MOVE from closed poll |
-| `withdraw_remaining_pulse(...)` | Withdraw unclaimed PULSE from closed poll |
+| `withdraw_remaining_move(...)` | Withdraw excess MOVE from closed poll (minus pending claims) |
+| `withdraw_remaining_pulse(...)` | Withdraw excess PULSE from closed poll (minus pending claims) |
+| `finalize_poll_move(registry, poll_id)` | Finalize poll, send unclaimed to treasury (CLOSED → FINALIZED) |
+| `finalize_poll_pulse(registry, poll_id)` | Finalize poll, send unclaimed to treasury (CLOSED → FINALIZED) |
 | `set_platform_fee(registry, fee_bps)` | Update platform fee (admin only) |
 | `set_treasury(registry, treasury)` | Update treasury address (admin only) |
+| `set_claim_period(registry, seconds)` | Update grace period duration (admin only) |
 | `transfer_admin(registry, new_admin)` | Transfer admin role |
 
 ### View Functions
@@ -176,13 +200,15 @@ Polling system with MOVE and PULSE reward support.
 | `get_poll_count(registry)` | Total number of polls |
 | `has_voted(registry, poll_id, voter)` | Check if address has voted |
 | `has_claimed(registry, poll_id, claimer)` | Check if address has claimed |
+| `can_finalize_poll(registry, poll_id)` | Check if grace period has elapsed |
+| `get_claim_period(registry)` | Get grace period duration in seconds |
 | `get_platform_config(registry)` | Fee, treasury, total fees collected |
 
 ### Poll Parameters
 
 - **reward_per_vote**: Fixed amount per voter (0 = equal split mode)
 - **max_voters**: Maximum voters allowed (0 = unlimited in fixed mode)
-- **distribution_mode**: 0 = Manual Pull, 1 = Manual Push
+- **distribution_mode**: 0 = MANUAL_PULL (voters claim), 1 = MANUAL_PUSH (creator distributes)
 - **coin_type_id**: 0 = MOVE, 1 = PULSE
 
 ---

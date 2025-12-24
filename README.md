@@ -19,7 +19,7 @@ mvpulse/
 | Package | Address | Module |
 |---------|---------|--------|
 | **pulse** | `0x69c7c6752b3426e00fec646270e5b7e9f0efa18bddbd7f112a8e84f7fbe3f737` | `pulse::pulse` |
-| **poll** | `0x306980d338caa4537e109afdc15f7f749b5948c9e69ec0178a7527363cdca70e` | `poll::poll` |
+| **poll** | `0x7da34dec279b1e7247a612d017a4b931977ce3bdcdffca54da28c508388c60de` | `poll::poll` |
 | **swap** | `0x55872704413ffc43bb832df7eb14c0665c9ae401897077a262d56e2de37d2b7e` | `swap::swap` |
 | **staking** | `0xa317fa282be3423cd8378b818f04ba9492981d955206ed2a46eff281be8aa55f` | `staking::staking` |
 
@@ -29,7 +29,9 @@ mvpulse/
 - Create polls with MOVE or PULSE rewards
 - Multiple reward distribution modes (Fixed per vote, Equal split)
 - Platform fee (2%) for sustainability
-- Manual claim or automatic distribution
+- Manual claim (MANUAL_PULL) or creator distribution (MANUAL_PUSH)
+- Full poll lifecycle: ACTIVE → CLAIMING → CLOSED → FINALIZED
+- Grace period before finalization for unclaimed rewards
 
 ### PULSE Token
 - Fixed supply Fungible Asset (FA) token
@@ -92,7 +94,7 @@ Create a `.env` file in the `frontend/` directory:
 
 ```env
 # Testnet
-VITE_TESTNET_CONTRACT_ADDRESS=0x306980d338caa4537e109afdc15f7f749b5948c9e69ec0178a7527363cdca70e
+VITE_TESTNET_CONTRACT_ADDRESS=0x7da34dec279b1e7247a612d017a4b931977ce3bdcdffca54da28c508388c60de
 VITE_TESTNET_PULSE_CONTRACT_ADDRESS=0x69c7c6752b3426e00fec646270e5b7e9f0efa18bddbd7f112a8e84f7fbe3f737
 VITE_TESTNET_SWAP_CONTRACT_ADDRESS=0x55872704413ffc43bb832df7eb14c0665c9ae401897077a262d56e2de37d2b7e
 VITE_TESTNET_STAKING_CONTRACT_ADDRESS=0xa317fa282be3423cd8378b818f04ba9492981d955206ed2a46eff281be8aa55f

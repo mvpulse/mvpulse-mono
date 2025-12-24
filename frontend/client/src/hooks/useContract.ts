@@ -10,6 +10,7 @@ import {
   type TransactionData,
 } from "@/lib/sponsored-transactions";
 import { CoinTypeId, COIN_TYPES } from "@/lib/tokens";
+import { isIndexerOptimizationEnabled } from "@/lib/feature-flags";
 import type { Poll, PollWithMeta, CreatePollInput, VoteInput, TransactionResult, PlatformConfig } from "@/types/poll";
 
 // Extended transaction result with sponsorship info
@@ -356,9 +357,38 @@ export function useContract() {
     [executeTransaction, contractAddress]
   );
 
-  // Close a poll and set distribution mode
-  const closePoll = useCallback(
+  // Start claims on a poll and set distribution mode
+  // Transitions: ACTIVE → CLAIMING_OR_DISTRIBUTION
+  const startClaims = useCallback(
     async (pollId: number, distributionMode: number): Promise<TransactionResult> => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        return await executeTransaction(
+          "start_claims",
+          [
+            contractAddress, // registry_addr
+            pollId.toString(),
+            distributionMode.toString(),
+          ],
+          "Failed to start claims"
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to start claims";
+        setError(message);
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [executeTransaction, contractAddress]
+  );
+
+  // Close a poll (stop claims/distributions)
+  // Transitions: CLAIMING_OR_DISTRIBUTION → CLOSED
+  const closePoll = useCallback(
+    async (pollId: number): Promise<TransactionResult> => {
       setLoading(true);
       setError(null);
 
@@ -368,7 +398,6 @@ export function useContract() {
           [
             contractAddress, // registry_addr
             pollId.toString(),
-            distributionMode.toString(),
           ],
           "Failed to close poll"
         );
@@ -527,11 +556,19 @@ export function useContract() {
     [client, contractAddress]
   );
 
-  // Get all polls (fetches each poll individually)
+  // Get all polls (parallel or sequential based on feature flag)
   const getAllPolls = useCallback(async (): Promise<PollWithMeta[]> => {
     const count = await getPollCount();
     if (count === 0) return [];
 
+    // Use parallel fetching when indexer optimization is enabled
+    if (isIndexerOptimizationEnabled()) {
+      const pollPromises = Array.from({ length: count }, (_, i) => getPoll(i));
+      const results = await Promise.all(pollPromises);
+      return results.filter((poll): poll is PollWithMeta => poll !== null);
+    }
+
+    // Sequential fetching (original behavior)
     const polls: PollWithMeta[] = [];
     for (let i = 0; i < count; i++) {
       const poll = await getPoll(i);
@@ -583,6 +620,7 @@ export function useContract() {
     // Write functions
     createPoll,
     vote,
+    startClaims,
     closePoll,
     fundPoll,
     claimReward,

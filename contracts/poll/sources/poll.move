@@ -41,8 +41,8 @@ module poll::poll {
     /// Poll status
     const STATUS_ACTIVE: u8 = 0;
     const STATUS_CLOSED: u8 = 1;
-    const STATUS_CLAIMING: u8 = 2;  // For Manual Pull - participants can claim rewards
-    const STATUS_FINALIZED: u8 = 3; // Poll is finalized, no more claims allowed
+    const STATUS_CLAIMING_OR_DISTRIBUTION: u8 = 2;  // Poll closed - awaiting claims (MANUAL_PULL) or distribution (MANUAL_PUSH)
+    const STATUS_FINALIZED: u8 = 3; // Poll is finalized, no more claims/distributions allowed
 
     /// Distribution modes
     const DISTRIBUTION_UNSET: u8 = 255;       // Not yet selected
@@ -506,9 +506,11 @@ module poll::poll {
         });
     }
 
-    /// Close a poll and set distribution mode
+    /// Start claims on a poll and set distribution mode
     /// distribution_mode: 0 = Manual Pull (participants claim), 1 = Manual Push (creator distributes)
-    public entry fun close_poll(
+    /// Can only be called on ACTIVE polls
+    /// Transitions: ACTIVE → CLAIMING_OR_DISTRIBUTION
+    public entry fun start_claims(
         account: &signer,
         registry_addr: address,
         poll_id: u64,
@@ -527,15 +529,8 @@ module poll::poll {
         // Set distribution mode
         poll.distribution_mode = distribution_mode;
 
-        // Record closed timestamp for claim period calculation
-        poll.closed_at = timestamp::now_seconds();
-
-        // Set status based on distribution mode
-        if (distribution_mode == DISTRIBUTION_MANUAL_PULL) {
-            poll.status = STATUS_CLAIMING;
-        } else {
-            poll.status = STATUS_CLOSED;
-        };
+        // Set status to CLAIMING_OR_DISTRIBUTION
+        poll.status = STATUS_CLAIMING_OR_DISTRIBUTION;
 
         let total_voters = vector::length(&poll.voters);
 
@@ -544,6 +539,30 @@ module poll::poll {
             distribution_mode,
             total_voters,
         });
+    }
+
+    /// Close a poll (stop claims/distributions)
+    /// Can only be called on CLAIMING_OR_DISTRIBUTION polls
+    /// Transitions: CLAIMING_OR_DISTRIBUTION → CLOSED
+    public entry fun close_poll(
+        account: &signer,
+        registry_addr: address,
+        poll_id: u64,
+    ) acquires PollRegistry {
+        let caller = signer::address_of(account);
+        let registry = borrow_global_mut<PollRegistry>(registry_addr);
+
+        assert!(poll_id < vector::length(&registry.polls), E_POLL_NOT_FOUND);
+
+        let poll = vector::borrow_mut(&mut registry.polls, poll_id);
+        assert!(poll.creator == caller, E_NOT_OWNER);
+        assert!(poll.status == STATUS_CLAIMING_OR_DISTRIBUTION, E_POLL_NOT_CLAIMABLE);
+
+        // Record closed timestamp for finalization grace period calculation
+        poll.closed_at = timestamp::now_seconds();
+
+        // Set status to CLOSED
+        poll.status = STATUS_CLOSED;
     }
 
     /// Claim MOVE reward (for Manual Pull distribution mode)
@@ -561,7 +580,7 @@ module poll::poll {
         assert!(poll.coin_type_id == COIN_TYPE_APTOS, E_COIN_TYPE_MISMATCH);
 
         // Must be in claiming status
-        assert!(poll.status == STATUS_CLAIMING, E_POLL_NOT_CLAIMABLE);
+        assert!(poll.status == STATUS_CLAIMING_OR_DISTRIBUTION, E_POLL_NOT_CLAIMABLE);
         assert!(poll.distribution_mode == DISTRIBUTION_MANUAL_PULL, E_INVALID_DISTRIBUTION_MODE);
 
         // Check claimer is a voter
@@ -630,7 +649,7 @@ module poll::poll {
         assert!(poll.coin_type_id == COIN_TYPE_PULSE, E_COIN_TYPE_MISMATCH);
 
         // Must be in claiming status
-        assert!(poll.status == STATUS_CLAIMING, E_POLL_NOT_CLAIMABLE);
+        assert!(poll.status == STATUS_CLAIMING_OR_DISTRIBUTION, E_POLL_NOT_CLAIMABLE);
         assert!(poll.distribution_mode == DISTRIBUTION_MANUAL_PULL, E_INVALID_DISTRIBUTION_MODE);
 
         // Check claimer is a voter
@@ -701,7 +720,7 @@ module poll::poll {
 
         assert!(poll.creator == caller, E_NOT_OWNER);
         assert!(poll.coin_type_id == COIN_TYPE_APTOS, E_COIN_TYPE_MISMATCH);
-        assert!(poll.status == STATUS_CLOSED, E_POLL_NOT_CLAIMABLE);
+        assert!(poll.status == STATUS_CLAIMING_OR_DISTRIBUTION, E_POLL_NOT_CLAIMABLE);
         assert!(poll.distribution_mode == DISTRIBUTION_MANUAL_PUSH, E_INVALID_DISTRIBUTION_MODE);
         assert!(!poll.rewards_distributed, E_REWARDS_ALREADY_DISTRIBUTED);
 
@@ -761,7 +780,7 @@ module poll::poll {
 
         assert!(poll.creator == caller, E_NOT_OWNER);
         assert!(poll.coin_type_id == COIN_TYPE_PULSE, E_COIN_TYPE_MISMATCH);
-        assert!(poll.status == STATUS_CLOSED, E_POLL_NOT_CLAIMABLE);
+        assert!(poll.status == STATUS_CLAIMING_OR_DISTRIBUTION, E_POLL_NOT_CLAIMABLE);
         assert!(poll.distribution_mode == DISTRIBUTION_MANUAL_PUSH, E_INVALID_DISTRIBUTION_MODE);
         assert!(!poll.rewards_distributed, E_REWARDS_ALREADY_DISTRIBUTED);
 
@@ -809,9 +828,9 @@ module poll::poll {
         });
     }
 
-    /// Withdraw excess MOVE funds from a poll (only creator, only after poll closed)
-    /// For CLAIMING status: only withdraws excess beyond what's owed to unclaimed voters
-    /// For CLOSED/FINALIZED status: withdraws all remaining funds
+    /// Withdraw excess MOVE funds from a poll (only creator, only in CLOSED status)
+    /// For MANUAL_PULL: withdraws excess beyond what's owed to unclaimed voters
+    /// For MANUAL_PUSH: withdraws all remaining funds
     public entry fun withdraw_remaining_move(
         account: &signer,
         registry_addr: address,
@@ -825,11 +844,12 @@ module poll::poll {
         let poll = vector::borrow_mut(&mut registry.polls, poll_id);
         assert!(poll.creator == caller, E_NOT_OWNER);
         assert!(poll.coin_type_id == COIN_TYPE_APTOS, E_COIN_TYPE_MISMATCH);
-        assert!(poll.status != STATUS_ACTIVE, E_POLL_NOT_ENDED);
+        // Only allow withdrawal in CLOSED status (during grace period)
+        assert!(poll.status == STATUS_CLOSED, E_POLL_NOT_ENDED);
 
-        // Calculate withdrawable amount
-        let withdrawable = if (poll.status == STATUS_CLAIMING && poll.reward_per_vote > 0) {
-            // For CLAIMING status with fixed rewards: only withdraw excess
+        // Calculate withdrawable amount (reward_pool minus owed to unclaimed voters)
+        let withdrawable = if (poll.distribution_mode == DISTRIBUTION_MANUAL_PULL && poll.reward_per_vote > 0) {
+            // For MANUAL_PULL with fixed rewards: withdraw excess beyond what's owed
             let total_voters = vector::length(&poll.voters);
             let claimed_count = vector::length(&poll.claimed);
             let unclaimed_count = total_voters - claimed_count;
@@ -839,11 +859,8 @@ module poll::poll {
             } else {
                 0
             }
-        } else if (poll.status == STATUS_CLAIMING) {
-            // For CLAIMING status with equal split: no excess, all goes to voters
-            0
         } else {
-            // For CLOSED or FINALIZED: can withdraw all remaining
+            // For MANUAL_PUSH or equal split: can withdraw all remaining
             poll.reward_pool
         };
 
@@ -855,9 +872,9 @@ module poll::poll {
         };
     }
 
-    /// Withdraw excess PULSE funds from a poll (only creator, only after poll closed)
-    /// For CLAIMING status: only withdraws excess beyond what's owed to unclaimed voters
-    /// For CLOSED/FINALIZED status: withdraws all remaining funds
+    /// Withdraw excess PULSE funds from a poll (only creator, only in CLOSED status)
+    /// For MANUAL_PULL: withdraws excess beyond what's owed to unclaimed voters
+    /// For MANUAL_PUSH: withdraws all remaining funds
     public entry fun withdraw_remaining_pulse(
         account: &signer,
         registry_addr: address,
@@ -871,11 +888,12 @@ module poll::poll {
         let poll = vector::borrow_mut(&mut registry.polls, poll_id);
         assert!(poll.creator == caller, E_NOT_OWNER);
         assert!(poll.coin_type_id == COIN_TYPE_PULSE, E_COIN_TYPE_MISMATCH);
-        assert!(poll.status != STATUS_ACTIVE, E_POLL_NOT_ENDED);
+        // Only allow withdrawal in CLOSED status (during grace period)
+        assert!(poll.status == STATUS_CLOSED, E_POLL_NOT_ENDED);
 
-        // Calculate withdrawable amount
-        let withdrawable = if (poll.status == STATUS_CLAIMING && poll.reward_per_vote > 0) {
-            // For CLAIMING status with fixed rewards: only withdraw excess
+        // Calculate withdrawable amount (reward_pool minus owed to unclaimed voters)
+        let withdrawable = if (poll.distribution_mode == DISTRIBUTION_MANUAL_PULL && poll.reward_per_vote > 0) {
+            // For MANUAL_PULL with fixed rewards: withdraw excess beyond what's owed
             let total_voters = vector::length(&poll.voters);
             let claimed_count = vector::length(&poll.claimed);
             let unclaimed_count = total_voters - claimed_count;
@@ -885,11 +903,8 @@ module poll::poll {
             } else {
                 0
             }
-        } else if (poll.status == STATUS_CLAIMING) {
-            // For CLAIMING status with equal split: no excess, all goes to voters
-            0
         } else {
-            // For CLOSED or FINALIZED: can withdraw all remaining
+            // For MANUAL_PUSH or equal split: can withdraw all remaining
             poll.reward_pool
         };
 
@@ -985,13 +1000,12 @@ module poll::poll {
         let poll = vector::borrow_mut(&mut registry.polls, poll_id);
         assert!(poll.creator == caller, E_NOT_OWNER);
         assert!(poll.coin_type_id == COIN_TYPE_APTOS, E_COIN_TYPE_MISMATCH);
-        assert!(poll.status == STATUS_CLAIMING, E_POLL_NOT_IN_CLAIMING);
-        assert!(poll.status != STATUS_FINALIZED, E_POLL_ALREADY_FINALIZED);
+        assert!(poll.status == STATUS_CLOSED, E_POLL_NOT_IN_CLAIMING);
 
-        // Check claim period has elapsed
+        // Check grace period has elapsed since poll was closed
         let current_time = timestamp::now_seconds();
-        let claim_deadline = poll.closed_at + registry.claim_period_secs;
-        assert!(current_time >= claim_deadline, E_CLAIM_PERIOD_NOT_ELAPSED);
+        let finalize_deadline = poll.closed_at + registry.claim_period_secs;
+        assert!(current_time >= finalize_deadline, E_CLAIM_PERIOD_NOT_ELAPSED);
 
         let unclaimed_amount = poll.reward_pool;
         let sent_to_treasury = false;
@@ -1031,13 +1045,12 @@ module poll::poll {
         let poll = vector::borrow_mut(&mut registry.polls, poll_id);
         assert!(poll.creator == caller, E_NOT_OWNER);
         assert!(poll.coin_type_id == COIN_TYPE_PULSE, E_COIN_TYPE_MISMATCH);
-        assert!(poll.status == STATUS_CLAIMING, E_POLL_NOT_IN_CLAIMING);
-        assert!(poll.status != STATUS_FINALIZED, E_POLL_ALREADY_FINALIZED);
+        assert!(poll.status == STATUS_CLOSED, E_POLL_NOT_IN_CLAIMING);
 
-        // Check claim period has elapsed
+        // Check grace period has elapsed since poll was closed
         let current_time = timestamp::now_seconds();
-        let claim_deadline = poll.closed_at + registry.claim_period_secs;
-        assert!(current_time >= claim_deadline, E_CLAIM_PERIOD_NOT_ELAPSED);
+        let finalize_deadline = poll.closed_at + registry.claim_period_secs;
+        assert!(current_time >= finalize_deadline, E_CLAIM_PERIOD_NOT_ELAPSED);
 
         let unclaimed_amount = poll.reward_pool;
         let sent_to_treasury = false;
@@ -1135,12 +1148,12 @@ module poll::poll {
         assert!(poll_id < vector::length(&registry.polls), E_POLL_NOT_FOUND);
 
         let poll = vector::borrow(&registry.polls, poll_id);
-        if (poll.status != STATUS_CLAIMING) {
+        if (poll.status != STATUS_CLOSED) {
             return false
         };
 
         let current_time = timestamp::now_seconds();
-        let claim_deadline = poll.closed_at + registry.claim_period_secs;
-        current_time >= claim_deadline
+        let finalize_deadline = poll.closed_at + registry.claim_period_secs;
+        current_time >= finalize_deadline
     }
 }
