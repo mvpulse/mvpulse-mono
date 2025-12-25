@@ -412,3 +412,121 @@ export const referralStats = pgTable("referral_stats", {
 
 export type ReferralStats = typeof referralStats.$inferSelect;
 export type InsertReferralStats = typeof referralStats.$inferInsert;
+
+// ============================================
+// Questionnaire System Constants
+// ============================================
+
+export const QUESTIONNAIRE_STATUS = {
+  DRAFT: 0,
+  ACTIVE: 1,
+  ENDED: 2,
+  CLAIMABLE: 3,
+  ARCHIVED: 4,
+} as const;
+
+export const QUESTIONNAIRE_REWARD_TYPE = {
+  PER_POLL: 0,      // Each poll has its own rewards
+  SHARED_POOL: 1,   // Single reward pool for questionnaire completion
+} as const;
+
+export const QUESTIONNAIRE_POLL_SOURCE = {
+  NEW: "new",
+  EXISTING: "existing",
+} as const;
+
+// ============================================
+// Questionnaires
+// ============================================
+
+export const questionnaires = pgTable("questionnaires", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  onChainId: integer("on_chain_id"), // For shared pool questionnaires (QuestionnaireRewardPool id)
+  creatorAddress: varchar("creator_address", { length: 66 }).notNull(),
+
+  title: varchar("title", { length: 200 }).notNull(),
+  description: text("description"),
+  category: varchar("category", { length: 50 }),
+
+  startTime: timestamp("start_time").notNull(),
+  endTime: timestamp("end_time").notNull(),
+
+  // Reward configuration
+  rewardType: integer("reward_type").default(QUESTIONNAIRE_REWARD_TYPE.PER_POLL).notNull(),
+  totalRewardAmount: varchar("total_reward_amount", { length: 50 }).default("0").notNull(), // For shared pool
+  coinTypeId: integer("coin_type_id").default(0).notNull(), // 0=MOVE, 1=PULSE, 2=USDC
+  rewardPerCompletion: varchar("reward_per_completion", { length: 50 }).default("0").notNull(), // 0 = equal split
+  maxCompleters: integer("max_completers"), // null = unlimited
+
+  // Settings (flexible JSON for future extensions)
+  settings: jsonb("settings").$type<{
+    allowPartialSave?: boolean;
+    showProgressBar?: boolean;
+    shufflePolls?: boolean;
+    requireAllPolls?: boolean;
+  }>().default({}).notNull(),
+
+  status: integer("status").default(QUESTIONNAIRE_STATUS.DRAFT).notNull(),
+  pollCount: integer("poll_count").default(0).notNull(),
+  completionCount: integer("completion_count").default(0).notNull(),
+
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export type Questionnaire = typeof questionnaires.$inferSelect;
+export type InsertQuestionnaire = typeof questionnaires.$inferInsert;
+
+// ============================================
+// Questionnaire Polls (junction table)
+// ============================================
+
+export const questionnairePolls = pgTable("questionnaire_polls", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  questionnaireId: varchar("questionnaire_id", { length: 36 }).notNull(),
+  pollId: integer("poll_id").notNull(), // On-chain poll ID
+
+  sortOrder: integer("sort_order").default(0).notNull(),
+  rewardPercentage: integer("reward_percentage"), // For shared pool, percentage of reward attributed to this poll
+  source: varchar("source", { length: 20 }).default("existing").notNull(), // "new" | "existing"
+
+  addedAt: timestamp("added_at").defaultNow().notNull(),
+});
+
+export type QuestionnairePoll = typeof questionnairePolls.$inferSelect;
+export type InsertQuestionnairePoll = typeof questionnairePolls.$inferInsert;
+
+// ============================================
+// Questionnaire Progress (user progress tracking)
+// ============================================
+
+export const questionnaireProgress = pgTable("questionnaire_progress", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  questionnaireId: varchar("questionnaire_id", { length: 36 }).notNull(),
+  walletAddress: varchar("wallet_address", { length: 66 }).notNull(),
+
+  started: boolean("started").default(false).notNull(),
+  pollsAnswered: jsonb("polls_answered").$type<{
+    pollId: number;
+    optionIndex: number;
+    answeredAt: string;
+  }[]>().default([]).notNull(),
+  isComplete: boolean("is_complete").default(false).notNull(),
+
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+
+  // For shared pool reward claiming
+  claimed: boolean("claimed").default(false).notNull(),
+  claimedAt: timestamp("claimed_at"),
+  claimTxHash: varchar("claim_tx_hash", { length: 66 }),
+
+  // Bulk vote transaction hash
+  bulkVoteTxHash: varchar("bulk_vote_tx_hash", { length: 66 }),
+
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export type QuestionnaireProgress = typeof questionnaireProgress.$inferSelect;
+export type InsertQuestionnaireProgress = typeof questionnaireProgress.$inferInsert;

@@ -458,6 +458,41 @@ export function useContract() {
     [executeTransaction, contractAddress]
   );
 
+  // Bulk vote on multiple polls atomically (for questionnaires)
+  const bulkVote = useCallback(
+    async (pollIds: number[], optionIndices: number[]): Promise<TransactionResult> => {
+      setLoading(true);
+      setError(null);
+
+      if (pollIds.length !== optionIndices.length) {
+        throw new Error("Poll IDs and option indices must have the same length");
+      }
+
+      if (pollIds.length === 0) {
+        throw new Error("At least one vote is required");
+      }
+
+      try {
+        return await executeTransaction(
+          "bulk_vote",
+          [
+            contractAddress, // registry_addr
+            pollIds.map(id => id.toString()),
+            optionIndices.map(idx => idx.toString()),
+          ],
+          "Failed to submit bulk votes"
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to submit bulk votes";
+        setError(message);
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [executeTransaction, contractAddress]
+  );
+
   // Get a single poll by ID (view function)
   const getPoll = useCallback(
     async (pollId: number): Promise<PollWithMeta | null> => {
@@ -666,6 +701,7 @@ export function useContract() {
     // Write functions
     createPoll,
     vote,
+    bulkVote,
     startClaims,
     closePoll,
     fundPoll,

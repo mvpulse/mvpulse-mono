@@ -38,6 +38,10 @@ import DonorExplore from "@/pages/donor/Explore";
 import DonorFunded from "@/pages/donor/Funded";
 import DonorHistory from "@/pages/donor/History";
 
+// Questionnaire pages
+import Questionnaires from "@/pages/questionnaire/Questionnaires";
+import QuestionnaireDetail from "@/pages/questionnaire/QuestionnaireDetail";
+
 function App() {
   return (
     <SidebarProvider>
@@ -76,6 +80,10 @@ function App() {
             <Route path="/donor/explore" component={DonorExplore} />
             <Route path="/donor/funded" component={DonorFunded} />
             <Route path="/donor/history" component={DonorHistory} />
+
+            {/* Questionnaire routes */}
+            <Route path="/questionnaires" component={Questionnaires} />
+            <Route path="/questionnaire/:id" component={QuestionnaireDetail} />
 
             <Route component={NotFound} />
           </Switch>
