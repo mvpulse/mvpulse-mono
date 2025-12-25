@@ -32,6 +32,7 @@ import {
   Loader2,
   Wallet,
   Info,
+  Calculator,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useContract } from "@/hooks/useContract";
@@ -46,6 +47,7 @@ import { COIN_TYPES, getCoinSymbol, getFAMetadataAddress, CoinTypeId } from "@/l
 import { formatBalance, parseToSmallestUnit } from "@/lib/balance";
 import { useNetwork } from "@/contexts/NetworkContext";
 import type { PollWithMeta, CreatePollInput } from "@/types/poll";
+import { PLATFORM_FEE_BPS, calculatePlatformFee, calculateNetAmount } from "@/types/poll";
 import { type PollFormData } from "@/components/poll";
 import {
   CreationMethodSelector,
@@ -121,6 +123,35 @@ export default function CreateQuestionnaire() {
 
   // Submission state
   const [isCreating, setIsCreating] = useState(false);
+
+  // Calculate platform fee for shared pool rewards
+  const rewardCalculations = useMemo(() => {
+    if (rewardType !== "shared_pool" || !totalRewardAmount) {
+      return { grossAmount: 0, fee: 0, netAmount: 0, rewardPerCompleter: 0, isValid: false };
+    }
+
+    const gross = parseFloat(totalRewardAmount) || 0;
+    const decimals = coinTypeId === COIN_TYPES.USDC ? 6 : 8;
+    const grossSmallest = gross * Math.pow(10, decimals);
+    const fee = calculatePlatformFee(grossSmallest) / Math.pow(10, decimals);
+    const net = calculateNetAmount(grossSmallest) / Math.pow(10, decimals);
+    const max = parseInt(maxCompleters) || 0;
+
+    let rewardPerCompleter = 0;
+    if (rewardPerCompletion === "equal" && max > 0) {
+      rewardPerCompleter = net / max;
+    } else if (rewardPerCompletion === "fixed" && fixedRewardAmount) {
+      rewardPerCompleter = parseFloat(fixedRewardAmount) || 0;
+    }
+
+    return {
+      grossAmount: gross,
+      fee,
+      netAmount: net,
+      rewardPerCompleter,
+      isValid: gross > 0,
+    };
+  }, [rewardType, totalRewardAmount, coinTypeId, maxCompleters, rewardPerCompletion, fixedRewardAmount]);
 
   // Load available polls
   useEffect(() => {
@@ -1023,6 +1054,14 @@ export default function CreateQuestionnaire() {
                   <div className="border-t pt-6 space-y-4">
                     <h4 className="font-medium">Shared Pool Configuration</h4>
 
+                    {/* Info Banner */}
+                    <div className="p-2.5 rounded-lg bg-muted/30 border border-border/50 flex items-start gap-2">
+                      <Info className="w-4 h-4 mt-0.5 text-muted-foreground shrink-0" />
+                      <p className="text-xs text-muted-foreground">
+                        Fund your questionnaire's reward pool. A {PLATFORM_FEE_BPS / 100}% platform fee applies.
+                      </p>
+                    </div>
+
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <Label htmlFor="coinType">Reward Token</Label>
@@ -1119,6 +1158,49 @@ export default function CreateQuestionnaire() {
                         className="mt-1"
                       />
                     </div>
+
+                    {/* Calculation Summary */}
+                    {rewardCalculations.isValid && (
+                      <div className="p-3 rounded-lg bg-accent/10 border border-accent/20 space-y-2">
+                        <div className="flex items-center gap-2 text-accent font-medium text-sm">
+                          <Calculator className="w-3 h-3" />
+                          Summary
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5 text-xs">
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Total Deposit:</span>
+                            <span className="font-mono font-medium">
+                              {rewardCalculations.grossAmount.toFixed(4)} {getCoinSymbol(coinTypeId)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Platform Fee ({PLATFORM_FEE_BPS / 100}%):</span>
+                            <span className="font-mono text-destructive">
+                              -{rewardCalculations.fee.toFixed(4)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Net Reward Pool:</span>
+                            <span className="font-mono font-medium text-green-600">
+                              {rewardCalculations.netAmount.toFixed(4)}
+                            </span>
+                          </div>
+                          {rewardCalculations.rewardPerCompleter > 0 && (
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Per completer:</span>
+                              <span className="font-mono">
+                                ~{rewardCalculations.rewardPerCompleter.toFixed(4)}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        {maxCompleters && (
+                          <div className="pt-1.5 border-t border-accent/20 text-[10px] text-muted-foreground">
+                            Max {maxCompleters} completers
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </>
               )}
@@ -1217,12 +1299,24 @@ export default function CreateQuestionnaire() {
                       {rewardType === "per_poll" ? "Per-Poll Rewards" : "Shared Pool"}
                     </Badge>
                   </div>
-                  {rewardType === "shared_pool" && (
+                  {rewardType === "shared_pool" && rewardCalculations.isValid && (
                     <>
                       <div>
-                        <span className="text-muted-foreground">Total Pool:</span>{" "}
+                        <span className="text-muted-foreground">Total Deposit:</span>{" "}
                         <span className="font-medium">
-                          {totalRewardAmount} {getCoinSymbol(coinTypeId)}
+                          {rewardCalculations.grossAmount.toFixed(4)} {getCoinSymbol(coinTypeId)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Platform Fee ({PLATFORM_FEE_BPS / 100}%):</span>{" "}
+                        <span className="font-medium text-destructive">
+                          -{rewardCalculations.fee.toFixed(4)} {getCoinSymbol(coinTypeId)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Net Reward Pool:</span>{" "}
+                        <span className="font-medium text-green-600">
+                          {rewardCalculations.netAmount.toFixed(4)} {getCoinSymbol(coinTypeId)}
                         </span>
                       </div>
                       <div>
