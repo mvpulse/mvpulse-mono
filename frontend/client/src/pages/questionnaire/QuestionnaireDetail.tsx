@@ -13,7 +13,8 @@ import {
   AlertCircle,
   Wallet,
 } from "lucide-react";
-import { QuestionnaireAnswerFlow } from "@/components/questionnaire";
+import { QuestionnaireAnswerFlow, SharedPoolRewardCard } from "@/components/questionnaire";
+import { useQuestionnaireProgress, QUESTIONNAIRE_REWARD_TYPE } from "@/hooks/useQuestionnaire";
 import {
   useQuestionnaire,
   getQuestionnaireStatusLabel,
@@ -33,7 +34,13 @@ export default function QuestionnaireDetail() {
     data: questionnaire,
     isLoading,
     error,
+    refetch: refetchQuestionnaire,
   } = useQuestionnaire(questionnaireId);
+
+  const { data: progress, refetch: refetchProgress } = useQuestionnaireProgress(
+    questionnaireId,
+    activeAddress || undefined
+  );
 
   if (isLoading) {
     return (
@@ -179,6 +186,28 @@ export default function QuestionnaireDetail() {
             </CardContent>
           </Card>
 
+          {/* Shared Pool Reward Card - inline for mobile */}
+          {questionnaire.rewardType === QUESTIONNAIRE_REWARD_TYPE.SHARED_POOL && (
+            <div className="lg:hidden">
+              <SharedPoolRewardCard
+                questionnaireId={questionnaire.id}
+                onChainId={questionnaire.onChainId}
+                rewardType={questionnaire.rewardType}
+                totalRewardAmount={questionnaire.totalRewardAmount || "0"}
+                rewardPerCompletion={questionnaire.rewardPerCompletion || "0"}
+                maxCompleters={questionnaire.maxCompleters}
+                coinTypeId={questionnaire.coinTypeId || 0}
+                completionCount={questionnaire.completionCount}
+                walletAddress={activeAddress || undefined}
+                isComplete={progress?.isComplete || false}
+                onClaimSuccess={() => {
+                  refetchQuestionnaire();
+                  refetchProgress();
+                }}
+              />
+            </div>
+          )}
+
           {/* Answer Flow */}
           {!activeAddress ? (
             <Card>
@@ -221,6 +250,28 @@ export default function QuestionnaireDetail() {
             />
           )}
         </div>
+
+        {/* Sidebar - Shared Pool Reward Card for desktop */}
+        {questionnaire.rewardType === QUESTIONNAIRE_REWARD_TYPE.SHARED_POOL && (
+          <div className="hidden lg:block lg:w-80 xl:w-96 space-y-6">
+            <SharedPoolRewardCard
+              questionnaireId={questionnaire.id}
+              onChainId={questionnaire.onChainId}
+              rewardType={questionnaire.rewardType}
+              totalRewardAmount={questionnaire.totalRewardAmount || "0"}
+              rewardPerCompletion={questionnaire.rewardPerCompletion || "0"}
+              maxCompleters={questionnaire.maxCompleters}
+              coinTypeId={questionnaire.coinTypeId || 0}
+              completionCount={questionnaire.completionCount}
+              walletAddress={activeAddress || undefined}
+              isComplete={progress?.isComplete || false}
+              onClaimSuccess={() => {
+                refetchQuestionnaire();
+                refetchProgress();
+              }}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

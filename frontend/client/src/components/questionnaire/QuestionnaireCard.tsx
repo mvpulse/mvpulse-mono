@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   Eye,
   EyeOff,
+  Gift,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -21,6 +22,7 @@ import {
   getQuestionnaireStatusLabel,
   getQuestionnaireStatusColor,
   QUESTIONNAIRE_STATUS,
+  QUESTIONNAIRE_REWARD_TYPE,
 } from "@/hooks/useQuestionnaire";
 import { formatBalanceWithSymbol } from "@/lib/balance";
 import { CoinTypeId } from "@/lib/tokens";
@@ -143,14 +145,27 @@ export function QuestionnaireCard({
           {questionnaire.totalRewardAmount &&
             questionnaire.totalRewardAmount !== "0" && (
               <div className="flex items-center gap-2 text-sm col-span-2">
-                <Coins className="h-4 w-4 text-muted-foreground" />
-                <span className="text-muted-foreground">Reward:</span>
+                {questionnaire.rewardType === QUESTIONNAIRE_REWARD_TYPE.SHARED_POOL ? (
+                  <Gift className="h-4 w-4 text-primary" />
+                ) : (
+                  <Coins className="h-4 w-4 text-muted-foreground" />
+                )}
+                <span className="text-muted-foreground">
+                  {questionnaire.rewardType === QUESTIONNAIRE_REWARD_TYPE.SHARED_POOL
+                    ? "Shared Pool:"
+                    : "Reward:"}
+                </span>
                 <span className="font-medium">
                   {formatBalanceWithSymbol(
                     Number(questionnaire.totalRewardAmount),
                     questionnaire.coinTypeId as CoinTypeId
                   )}
                 </span>
+                {questionnaire.rewardType === QUESTIONNAIRE_REWARD_TYPE.SHARED_POOL && (
+                  <Badge variant="secondary" className="text-xs ml-1">
+                    Pool
+                  </Badge>
+                )}
               </div>
             )}
 

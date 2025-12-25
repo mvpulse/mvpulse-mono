@@ -493,6 +493,245 @@ export function useContract() {
     [executeTransaction, contractAddress]
   );
 
+  // ============================================
+  // Questionnaire Pool Functions (Shared Rewards)
+  // ============================================
+
+  // Create a questionnaire-level shared reward pool
+  const createQuestionnairePool = useCallback(
+    async (
+      pollIds: number[],
+      rewardPerCompletion: number, // 0 = equal split
+      maxCompleters: number, // 0 = unlimited
+      durationSecs: number,
+      fundAmount: number,
+      faMetadataAddress: string,
+      coinTypeId: CoinTypeId
+    ): Promise<TransactionResult> => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        return await executeTransaction(
+          "create_questionnaire_pool_with_fa",
+          [
+            contractAddress,
+            pollIds.map(id => id.toString()),
+            rewardPerCompletion.toString(),
+            maxCompleters.toString(),
+            durationSecs.toString(),
+            fundAmount.toString(),
+            faMetadataAddress,
+            coinTypeId.toString(),
+          ],
+          "Failed to create questionnaire pool"
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to create questionnaire pool";
+        setError(message);
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [executeTransaction, contractAddress]
+  );
+
+  // Mark user as having completed a questionnaire (after bulk_vote)
+  const markQuestionnaireCompleted = useCallback(
+    async (questionnaireId: number): Promise<TransactionResult> => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        return await executeTransaction(
+          "mark_questionnaire_completed",
+          [contractAddress, questionnaireId.toString()],
+          "Failed to mark questionnaire completed"
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to mark questionnaire completed";
+        setError(message);
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [executeTransaction, contractAddress]
+  );
+
+  // Start questionnaire claiming period (creator only)
+  const startQuestionnaireClaims = useCallback(
+    async (questionnaireId: number): Promise<TransactionResult> => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        return await executeTransaction(
+          "start_questionnaire_claims",
+          [contractAddress, questionnaireId.toString()],
+          "Failed to start questionnaire claims"
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to start questionnaire claims";
+        setError(message);
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [executeTransaction, contractAddress]
+  );
+
+  // Claim questionnaire-level reward (shared pool)
+  const claimQuestionnaireReward = useCallback(
+    async (questionnaireId: number): Promise<TransactionResult> => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        return await executeTransaction(
+          "claim_questionnaire_reward_fa",
+          [contractAddress, questionnaireId.toString()],
+          "Failed to claim questionnaire reward"
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to claim questionnaire reward";
+        setError(message);
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [executeTransaction, contractAddress]
+  );
+
+  // Check if user has completed all polls in a questionnaire (view function)
+  const hasCompletedQuestionnaire = useCallback(
+    async (questionnaireId: number, userAddress?: string): Promise<boolean> => {
+      const address = userAddress || activeAddress;
+      if (!contractAddress || !address) return false;
+
+      try {
+        const result = await client.view({
+          payload: {
+            function: getFunctionId(contractAddress, "has_completed_questionnaire"),
+            typeArguments: [],
+            functionArguments: [contractAddress, questionnaireId.toString(), address],
+          },
+        });
+
+        return Boolean(result && result[0]);
+      } catch (err) {
+        console.error("Failed to check questionnaire completion:", err);
+        return false;
+      }
+    },
+    [client, contractAddress, activeAddress]
+  );
+
+  // Get questionnaire pool details (view function)
+  const getQuestionnairePool = useCallback(
+    async (questionnaireId: number): Promise<{
+      id: number;
+      creator: string;
+      poll_ids: number[];
+      reward_pool: number;
+      reward_per_completion: number;
+      max_completers: number;
+      completers: string[];
+      claimed: string[];
+      coin_type_id: number;
+      fa_metadata_address: string;
+      status: number;
+      end_time: number;
+      closed_at: number;
+    } | null> => {
+      if (!contractAddress) return null;
+
+      try {
+        const result = await client.view({
+          payload: {
+            function: getFunctionId(contractAddress, "get_questionnaire_pool"),
+            typeArguments: [],
+            functionArguments: [contractAddress, questionnaireId.toString()],
+          },
+        });
+
+        if (result && result[0]) {
+          const pool = result[0] as any;
+          return {
+            id: Number(pool.id),
+            creator: pool.creator,
+            poll_ids: pool.poll_ids.map((id: string) => Number(id)),
+            reward_pool: Number(pool.reward_pool),
+            reward_per_completion: Number(pool.reward_per_completion),
+            max_completers: Number(pool.max_completers),
+            completers: pool.completers,
+            claimed: pool.claimed,
+            coin_type_id: Number(pool.coin_type_id),
+            fa_metadata_address: pool.fa_metadata_address,
+            status: Number(pool.status),
+            end_time: Number(pool.end_time),
+            closed_at: Number(pool.closed_at),
+          };
+        }
+        return null;
+      } catch (err) {
+        console.error("Failed to get questionnaire pool:", err);
+        return null;
+      }
+    },
+    [client, contractAddress]
+  );
+
+  // Get questionnaire pool count (view function)
+  const getQuestionnairePoolCount = useCallback(async (): Promise<number> => {
+    if (!contractAddress) return 0;
+
+    try {
+      const result = await client.view({
+        payload: {
+          function: getFunctionId(contractAddress, "get_questionnaire_pool_count"),
+          typeArguments: [],
+          functionArguments: [contractAddress],
+        },
+      });
+
+      if (result && result[0] !== undefined) {
+        return Number(result[0]);
+      }
+      return 0;
+    } catch (err) {
+      console.error("Failed to get questionnaire pool count:", err);
+      return 0;
+    }
+  }, [client, contractAddress]);
+
+  // Check if user has claimed questionnaire reward (view function)
+  const hasClaimedQuestionnaire = useCallback(
+    async (questionnaireId: number, userAddress?: string): Promise<boolean> => {
+      const address = userAddress || activeAddress;
+      if (!contractAddress || !address) return false;
+
+      try {
+        const result = await client.view({
+          payload: {
+            function: getFunctionId(contractAddress, "has_claimed_questionnaire"),
+            typeArguments: [],
+            functionArguments: [contractAddress, questionnaireId.toString(), address],
+          },
+        });
+
+        return Boolean(result && result[0]);
+      } catch (err) {
+        console.error("Failed to check questionnaire claim status:", err);
+        return false;
+      }
+    },
+    [client, contractAddress, activeAddress]
+  );
+
   // Get a single poll by ID (view function)
   const getPoll = useCallback(
     async (pollId: number): Promise<PollWithMeta | null> => {
@@ -710,6 +949,12 @@ export function useContract() {
     withdrawRemaining,
     finalizePoll,
 
+    // Questionnaire pool write functions
+    createQuestionnairePool,
+    markQuestionnaireCompleted,
+    startQuestionnaireClaims,
+    claimQuestionnaireReward,
+
     // Read functions
     getPoll,
     getPollCount,
@@ -719,6 +964,12 @@ export function useContract() {
     getPlatformConfig,
     getClaimPeriod,
     canFinalizePoll,
+
+    // Questionnaire pool read functions
+    hasCompletedQuestionnaire,
+    getQuestionnairePool,
+    getQuestionnairePoolCount,
+    hasClaimedQuestionnaire,
 
     // Helpers
     enrichPoll,

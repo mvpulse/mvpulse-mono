@@ -41,6 +41,7 @@ import DonorHistory from "@/pages/donor/History";
 // Questionnaire pages
 import Questionnaires from "@/pages/questionnaire/Questionnaires";
 import QuestionnaireDetail from "@/pages/questionnaire/QuestionnaireDetail";
+import CreateQuestionnaire from "@/pages/questionnaire/CreateQuestionnaire";
 
 function App() {
   return (
@@ -83,6 +84,7 @@ function App() {
 
             {/* Questionnaire routes */}
             <Route path="/questionnaires" component={Questionnaires} />
+            <Route path="/questionnaire/create" component={CreateQuestionnaire} />
             <Route path="/questionnaire/:id" component={QuestionnaireDetail} />
 
             <Route component={NotFound} />
