@@ -1,6 +1,6 @@
 /// Poll module for MovePoll dApp
 /// Allows creating polls, voting, and distributing rewards
-/// Supports MOVE (legacy coin) and PULSE (Fungible Asset)
+/// Supports MOVE (legacy coin) and any Fungible Asset (PULSE, USDC, etc.)
 module poll::poll {
     use std::string::String;
     use std::vector;
@@ -12,6 +12,7 @@ module poll::poll {
     use aptos_framework::object::{Self, Object, ExtendRef};
     use aptos_framework::fungible_asset::{Self, Metadata, FungibleStore};
     use aptos_framework::primary_fungible_store;
+    use aptos_std::smart_table::{Self, SmartTable};
     use pulse::pulse;
 
     /// Error codes
@@ -37,6 +38,7 @@ module poll::poll {
     const E_CLAIM_PERIOD_NOT_ELAPSED: u64 = 20;
     const E_POLL_ALREADY_FINALIZED: u64 = 21;
     const E_POLL_NOT_IN_CLAIMING: u64 = 22;
+    const E_FA_VAULT_NOT_INITIALIZED: u64 = 23;
 
     /// Poll status
     const STATUS_ACTIVE: u8 = 0;
@@ -52,6 +54,7 @@ module poll::poll {
     /// Coin type identifiers
     const COIN_TYPE_APTOS: u8 = 0;    // AptosCoin (MOVE) - legacy coin
     const COIN_TYPE_PULSE: u8 = 1;    // PULSE token - Fungible Asset
+    const COIN_TYPE_USDC: u8 = 2;     // USDC token - Fungible Asset
 
     /// Fee constants
     const MAX_FEE_BPS: u64 = 1000;  // Max 10% fee
@@ -77,8 +80,9 @@ module poll::poll {
         rewards_distributed: bool,
         end_time: u64,
         status: u8,
-        coin_type_id: u8,             // 0 = AptosCoin, 1 = PULSE
+        coin_type_id: u8,             // 0 = AptosCoin, 1 = PULSE, 2 = USDC
         closed_at: u64,               // Timestamp when poll entered CLAIMING status (for claim period calculation)
+        fa_metadata_address: address, // For FA tokens: the metadata address (0x0 for legacy coins)
     }
 
     /// Global poll registry stored at contract address
@@ -97,11 +101,11 @@ module poll::poll {
         coins: coin::Coin<CoinType>,
     }
 
-    /// Reward vault for Fungible Assets (PULSE)
-    struct FARewardVault has key {
-        pulse_store: Object<FungibleStore>,
-        pulse_metadata: Object<Metadata>,
-        extend_ref: ExtendRef,  // For generating signer to manage the store
+    /// Generic reward vault for any Fungible Asset
+    /// Maps FA metadata address to fungible stores
+    struct GenericFAVault has key {
+        stores: SmartTable<address, Object<FungibleStore>>,
+        extend_ref: ExtendRef,
     }
 
     #[event]
@@ -163,8 +167,13 @@ module poll::poll {
         new_period_secs: u64,
     }
 
+    #[event]
+    struct FAVaultInitialized has drop, store {
+        metadata_address: address,
+    }
+
     /// Initialize the poll registry (call once when deploying)
-    /// Also initializes the AptosCoin vault and PULSE FA vault
+    /// Also initializes the AptosCoin vault and generic FA vault
     public entry fun initialize(account: &signer) {
         let admin_addr = signer::address_of(account);
         let registry = PollRegistry {
@@ -184,33 +193,41 @@ module poll::poll {
         };
         move_to(account, vault);
 
-        // Initialize the FA reward vault for PULSE
-        let pulse_metadata = pulse::get_metadata();
+        // Initialize the generic FA vault
         let constructor_ref = object::create_object(admin_addr);
         let extend_ref = object::generate_extend_ref(&constructor_ref);
-        let pulse_store = fungible_asset::create_store(&constructor_ref, pulse_metadata);
 
-        let fa_vault = FARewardVault {
-            pulse_store,
-            pulse_metadata,
+        let fa_vault = GenericFAVault {
+            stores: smart_table::new(),
             extend_ref,
         };
         move_to(account, fa_vault);
     }
 
-    /// Initialize vault for additional legacy coin types (call once per coin type)
-    /// Only admin can call this
-    public entry fun initialize_vault<CoinType>(
+    /// Initialize a store for a specific Fungible Asset in the generic vault
+    /// Must be called before using that FA for polls
+    public entry fun initialize_fa_store(
         account: &signer,
-        registry_addr: address
-    ) acquires PollRegistry {
+        registry_addr: address,
+        fa_metadata_address: address,
+    ) acquires PollRegistry, GenericFAVault {
         let registry = borrow_global<PollRegistry>(registry_addr);
         assert!(signer::address_of(account) == registry.admin, E_NOT_ADMIN);
 
-        let vault = RewardVault<CoinType> {
-            coins: coin::zero<CoinType>(),
+        let fa_vault = borrow_global_mut<GenericFAVault>(registry_addr);
+
+        // Check if store already exists
+        if (!smart_table::contains(&fa_vault.stores, fa_metadata_address)) {
+            let metadata = object::address_to_object<Metadata>(fa_metadata_address);
+            let vault_signer = object::generate_signer_for_extending(&fa_vault.extend_ref);
+            let constructor_ref = object::create_object(signer::address_of(&vault_signer));
+            let store = fungible_asset::create_store(&constructor_ref, metadata);
+            smart_table::add(&mut fa_vault.stores, fa_metadata_address, store);
+
+            event::emit(FAVaultInitialized {
+                metadata_address: fa_metadata_address,
+            });
         };
-        move_to(account, vault);
     }
 
     /// Create a new poll with MOVE (AptosCoin) rewards
@@ -263,11 +280,14 @@ module poll::poll {
             reward_pool,
             platform_fee,
             COIN_TYPE_APTOS,
+            @0x0, // No FA metadata for legacy coins
         );
     }
 
-    /// Create a new poll with PULSE (Fungible Asset) rewards
-    public entry fun create_poll_with_pulse(
+    /// Create a new poll with any Fungible Asset rewards (PULSE, USDC, etc.)
+    /// fa_metadata_address: The metadata address of the Fungible Asset
+    /// coin_type_id: The coin type identifier (1 = PULSE, 2 = USDC, etc.)
+    public entry fun create_poll_with_fa(
         account: &signer,
         registry_addr: address,
         title: String,
@@ -277,9 +297,15 @@ module poll::poll {
         max_voters: u64,
         duration_secs: u64,
         fund_amount: u64,
-    ) acquires PollRegistry, FARewardVault {
+        fa_metadata_address: address,
+        coin_type_id: u8,
+    ) acquires PollRegistry, GenericFAVault {
         let creator = signer::address_of(account);
         let registry = borrow_global_mut<PollRegistry>(registry_addr);
+        let fa_vault = borrow_global_mut<GenericFAVault>(registry_addr);
+
+        // Ensure the FA store is initialized
+        assert!(smart_table::contains(&fa_vault.stores, fa_metadata_address), E_FA_VAULT_NOT_INITIALIZED);
 
         // Calculate and collect platform fee
         let reward_pool = 0u64;
@@ -290,19 +316,19 @@ module poll::poll {
             platform_fee = (fund_amount * registry.platform_fee_bps) / 10000;
             let net_amount = fund_amount - platform_fee;
 
-            let pulse_metadata = pulse::get_metadata();
+            let metadata = object::address_to_object<Metadata>(fa_metadata_address);
 
             // Transfer fee to treasury
             if (platform_fee > 0) {
-                let fee_fa = primary_fungible_store::withdraw(account, pulse_metadata, platform_fee);
+                let fee_fa = primary_fungible_store::withdraw(account, metadata, platform_fee);
                 primary_fungible_store::deposit(registry.platform_treasury, fee_fa);
                 registry.total_fees_collected = registry.total_fees_collected + platform_fee;
             };
 
             // Transfer net amount to FA vault
-            let fa_vault = borrow_global<FARewardVault>(registry_addr);
-            let payment = primary_fungible_store::withdraw(account, pulse_metadata, net_amount);
-            fungible_asset::deposit(fa_vault.pulse_store, payment);
+            let store = smart_table::borrow(&fa_vault.stores, fa_metadata_address);
+            let payment = primary_fungible_store::withdraw(account, metadata, net_amount);
+            fungible_asset::deposit(*store, payment);
             reward_pool = net_amount;
         };
 
@@ -317,7 +343,8 @@ module poll::poll {
             duration_secs,
             reward_pool,
             platform_fee,
-            COIN_TYPE_PULSE,
+            coin_type_id,
+            fa_metadata_address,
         );
     }
 
@@ -334,6 +361,7 @@ module poll::poll {
         reward_pool: u64,
         platform_fee: u64,
         coin_type_id: u8,
+        fa_metadata_address: address,
     ) {
         let poll_id = registry.next_id;
         let num_options = vector::length(&options);
@@ -364,6 +392,7 @@ module poll::poll {
             status: STATUS_ACTIVE,
             coin_type_id,
             closed_at: 0,
+            fa_metadata_address,
         };
 
         vector::push_back(&mut registry.polls, poll);
@@ -415,13 +444,13 @@ module poll::poll {
         poll.reward_pool = poll.reward_pool + net_amount;
     }
 
-    /// Add PULSE funds to an existing poll (only creator can add funds)
-    public entry fun fund_poll_with_pulse(
+    /// Add FA funds to an existing poll (only creator can add funds)
+    public entry fun fund_poll_with_fa(
         account: &signer,
         registry_addr: address,
         poll_id: u64,
         amount: u64,
-    ) acquires PollRegistry, FARewardVault {
+    ) acquires PollRegistry, GenericFAVault {
         let caller = signer::address_of(account);
         let registry = borrow_global_mut<PollRegistry>(registry_addr);
 
@@ -429,25 +458,29 @@ module poll::poll {
         let poll = vector::borrow_mut(&mut registry.polls, poll_id);
         assert!(poll.creator == caller, E_NOT_OWNER);
         assert!(poll.status == STATUS_ACTIVE, E_POLL_CLOSED);
-        assert!(poll.coin_type_id == COIN_TYPE_PULSE, E_COIN_TYPE_MISMATCH);
+        assert!(poll.coin_type_id != COIN_TYPE_APTOS, E_COIN_TYPE_MISMATCH); // Must be FA type
+
+        let fa_metadata_address = poll.fa_metadata_address;
+        let fa_vault = borrow_global<GenericFAVault>(registry_addr);
+        assert!(smart_table::contains(&fa_vault.stores, fa_metadata_address), E_FA_VAULT_NOT_INITIALIZED);
 
         // Calculate and collect platform fee
         let platform_fee = (amount * registry.platform_fee_bps) / 10000;
         let net_amount = amount - platform_fee;
 
-        let pulse_metadata = pulse::get_metadata();
+        let metadata = object::address_to_object<Metadata>(fa_metadata_address);
 
         // Transfer fee to treasury
         if (platform_fee > 0) {
-            let fee_fa = primary_fungible_store::withdraw(account, pulse_metadata, platform_fee);
+            let fee_fa = primary_fungible_store::withdraw(account, metadata, platform_fee);
             primary_fungible_store::deposit(registry.platform_treasury, fee_fa);
             registry.total_fees_collected = registry.total_fees_collected + platform_fee;
         };
 
         // Transfer net amount to FA vault
-        let fa_vault = borrow_global<FARewardVault>(registry_addr);
-        let payment = primary_fungible_store::withdraw(account, pulse_metadata, net_amount);
-        fungible_asset::deposit(fa_vault.pulse_store, payment);
+        let store = smart_table::borrow(&fa_vault.stores, fa_metadata_address);
+        let payment = primary_fungible_store::withdraw(account, metadata, net_amount);
+        fungible_asset::deposit(*store, payment);
 
         poll.reward_pool = poll.reward_pool + net_amount;
     }
@@ -634,19 +667,19 @@ module poll::poll {
         });
     }
 
-    /// Claim PULSE reward (for Manual Pull distribution mode)
-    public entry fun claim_reward_pulse(
+    /// Claim FA reward (for Manual Pull distribution mode) - works for PULSE, USDC, any FA
+    public entry fun claim_reward_fa(
         account: &signer,
         registry_addr: address,
         poll_id: u64,
-    ) acquires PollRegistry, FARewardVault {
+    ) acquires PollRegistry, GenericFAVault {
         let claimer = signer::address_of(account);
         let registry = borrow_global_mut<PollRegistry>(registry_addr);
 
         assert!(poll_id < vector::length(&registry.polls), E_POLL_NOT_FOUND);
 
         let poll = vector::borrow_mut(&mut registry.polls, poll_id);
-        assert!(poll.coin_type_id == COIN_TYPE_PULSE, E_COIN_TYPE_MISMATCH);
+        assert!(poll.coin_type_id != COIN_TYPE_APTOS, E_COIN_TYPE_MISMATCH); // Must be FA type
 
         // Must be in claiming status
         assert!(poll.status == STATUS_CLAIMING_OR_DISTRIBUTION, E_POLL_NOT_CLAIMABLE);
@@ -688,10 +721,11 @@ module poll::poll {
         assert!(reward_amount <= poll.reward_pool, E_INSUFFICIENT_FUNDS);
 
         if (reward_amount > 0) {
-            let fa_vault = borrow_global<FARewardVault>(registry_addr);
-            // Use extend_ref to generate signer for withdrawal
+            let fa_metadata_address = poll.fa_metadata_address;
+            let fa_vault = borrow_global<GenericFAVault>(registry_addr);
+            let store = smart_table::borrow(&fa_vault.stores, fa_metadata_address);
             let vault_signer = object::generate_signer_for_extending(&fa_vault.extend_ref);
-            let reward_fa = fungible_asset::withdraw(&vault_signer, fa_vault.pulse_store, reward_amount);
+            let reward_fa = fungible_asset::withdraw(&vault_signer, *store, reward_amount);
             primary_fungible_store::deposit(claimer, reward_fa);
             poll.reward_pool = poll.reward_pool - reward_amount;
         };
@@ -765,12 +799,12 @@ module poll::poll {
         });
     }
 
-    /// Distribute PULSE rewards to all voters (for Manual Push distribution mode)
-    public entry fun distribute_rewards_pulse(
+    /// Distribute FA rewards to all voters (for Manual Push distribution mode) - works for PULSE, USDC, any FA
+    public entry fun distribute_rewards_fa(
         account: &signer,
         registry_addr: address,
         poll_id: u64,
-    ) acquires PollRegistry, FARewardVault {
+    ) acquires PollRegistry, GenericFAVault {
         let caller = signer::address_of(account);
         let registry = borrow_global_mut<PollRegistry>(registry_addr);
 
@@ -779,7 +813,7 @@ module poll::poll {
         let poll = vector::borrow_mut(&mut registry.polls, poll_id);
 
         assert!(poll.creator == caller, E_NOT_OWNER);
-        assert!(poll.coin_type_id == COIN_TYPE_PULSE, E_COIN_TYPE_MISMATCH);
+        assert!(poll.coin_type_id != COIN_TYPE_APTOS, E_COIN_TYPE_MISMATCH); // Must be FA type
         assert!(poll.status == STATUS_CLAIMING_OR_DISTRIBUTION, E_POLL_NOT_CLAIMABLE);
         assert!(poll.distribution_mode == DISTRIBUTION_MANUAL_PUSH, E_INVALID_DISTRIBUTION_MODE);
         assert!(!poll.rewards_distributed, E_REWARDS_ALREADY_DISTRIBUTED);
@@ -794,8 +828,9 @@ module poll::poll {
                 poll.reward_pool / (voter_count as u64)
             };
 
-            let fa_vault = borrow_global<FARewardVault>(registry_addr);
-            // Use extend_ref to generate signer for withdrawal
+            let fa_metadata_address = poll.fa_metadata_address;
+            let fa_vault = borrow_global<GenericFAVault>(registry_addr);
+            let store = smart_table::borrow(&fa_vault.stores, fa_metadata_address);
             let vault_signer = object::generate_signer_for_extending(&fa_vault.extend_ref);
 
             let i = 0;
@@ -807,9 +842,9 @@ module poll::poll {
                     poll.reward_pool
                 };
 
-                let vault_balance = fungible_asset::balance(fa_vault.pulse_store);
+                let vault_balance = fungible_asset::balance(*store);
                 if (actual_reward > 0 && actual_reward <= vault_balance) {
-                    let reward_fa = fungible_asset::withdraw(&vault_signer, fa_vault.pulse_store, actual_reward);
+                    let reward_fa = fungible_asset::withdraw(&vault_signer, *store, actual_reward);
                     primary_fungible_store::deposit(voter, reward_fa);
                     poll.reward_pool = poll.reward_pool - actual_reward;
                     total_distributed = total_distributed + actual_reward;
@@ -829,8 +864,6 @@ module poll::poll {
     }
 
     /// Withdraw excess MOVE funds from a poll (only creator, only in CLOSED status)
-    /// For MANUAL_PULL: withdraws excess beyond what's owed to unclaimed voters
-    /// For MANUAL_PUSH: withdraws all remaining funds
     public entry fun withdraw_remaining_move(
         account: &signer,
         registry_addr: address,
@@ -844,12 +877,9 @@ module poll::poll {
         let poll = vector::borrow_mut(&mut registry.polls, poll_id);
         assert!(poll.creator == caller, E_NOT_OWNER);
         assert!(poll.coin_type_id == COIN_TYPE_APTOS, E_COIN_TYPE_MISMATCH);
-        // Only allow withdrawal in CLOSED status (during grace period)
         assert!(poll.status == STATUS_CLOSED, E_POLL_NOT_ENDED);
 
-        // Calculate withdrawable amount (reward_pool minus owed to unclaimed voters)
         let withdrawable = if (poll.distribution_mode == DISTRIBUTION_MANUAL_PULL && poll.reward_per_vote > 0) {
-            // For MANUAL_PULL with fixed rewards: withdraw excess beyond what's owed
             let total_voters = vector::length(&poll.voters);
             let claimed_count = vector::length(&poll.claimed);
             let unclaimed_count = total_voters - claimed_count;
@@ -860,7 +890,6 @@ module poll::poll {
                 0
             }
         } else {
-            // For MANUAL_PUSH or equal split: can withdraw all remaining
             poll.reward_pool
         };
 
@@ -872,14 +901,12 @@ module poll::poll {
         };
     }
 
-    /// Withdraw excess PULSE funds from a poll (only creator, only in CLOSED status)
-    /// For MANUAL_PULL: withdraws excess beyond what's owed to unclaimed voters
-    /// For MANUAL_PUSH: withdraws all remaining funds
-    public entry fun withdraw_remaining_pulse(
+    /// Withdraw excess FA funds from a poll (only creator, only in CLOSED status)
+    public entry fun withdraw_remaining_fa(
         account: &signer,
         registry_addr: address,
         poll_id: u64,
-    ) acquires PollRegistry, FARewardVault {
+    ) acquires PollRegistry, GenericFAVault {
         let caller = signer::address_of(account);
         let registry = borrow_global_mut<PollRegistry>(registry_addr);
 
@@ -887,13 +914,10 @@ module poll::poll {
 
         let poll = vector::borrow_mut(&mut registry.polls, poll_id);
         assert!(poll.creator == caller, E_NOT_OWNER);
-        assert!(poll.coin_type_id == COIN_TYPE_PULSE, E_COIN_TYPE_MISMATCH);
-        // Only allow withdrawal in CLOSED status (during grace period)
+        assert!(poll.coin_type_id != COIN_TYPE_APTOS, E_COIN_TYPE_MISMATCH);
         assert!(poll.status == STATUS_CLOSED, E_POLL_NOT_ENDED);
 
-        // Calculate withdrawable amount (reward_pool minus owed to unclaimed voters)
         let withdrawable = if (poll.distribution_mode == DISTRIBUTION_MANUAL_PULL && poll.reward_per_vote > 0) {
-            // For MANUAL_PULL with fixed rewards: withdraw excess beyond what's owed
             let total_voters = vector::length(&poll.voters);
             let claimed_count = vector::length(&poll.claimed);
             let unclaimed_count = total_voters - claimed_count;
@@ -904,14 +928,15 @@ module poll::poll {
                 0
             }
         } else {
-            // For MANUAL_PUSH or equal split: can withdraw all remaining
             poll.reward_pool
         };
 
         if (withdrawable > 0) {
-            let fa_vault = borrow_global<FARewardVault>(registry_addr);
+            let fa_metadata_address = poll.fa_metadata_address;
+            let fa_vault = borrow_global<GenericFAVault>(registry_addr);
+            let store = smart_table::borrow(&fa_vault.stores, fa_metadata_address);
             let vault_signer = object::generate_signer_for_extending(&fa_vault.extend_ref);
-            let fa = fungible_asset::withdraw(&vault_signer, fa_vault.pulse_store, withdrawable);
+            let fa = fungible_asset::withdraw(&vault_signer, *store, withdrawable);
             primary_fungible_store::deposit(caller, fa);
             poll.reward_pool = poll.reward_pool - withdrawable;
         };
@@ -984,9 +1009,7 @@ module poll::poll {
         });
     }
 
-    /// Finalize a CLAIMING poll with MOVE rewards
-    /// Can only be called after claim period has elapsed
-    /// Unclaimed rewards are sent to treasury
+    /// Finalize a CLOSED poll with MOVE rewards
     public entry fun finalize_poll_move(
         account: &signer,
         registry_addr: address,
@@ -1002,7 +1025,6 @@ module poll::poll {
         assert!(poll.coin_type_id == COIN_TYPE_APTOS, E_COIN_TYPE_MISMATCH);
         assert!(poll.status == STATUS_CLOSED, E_POLL_NOT_IN_CLAIMING);
 
-        // Check grace period has elapsed since poll was closed
         let current_time = timestamp::now_seconds();
         let finalize_deadline = poll.closed_at + registry.claim_period_secs;
         assert!(current_time >= finalize_deadline, E_CLAIM_PERIOD_NOT_ELAPSED);
@@ -1010,7 +1032,6 @@ module poll::poll {
         let unclaimed_amount = poll.reward_pool;
         let sent_to_treasury = false;
 
-        // Send unclaimed rewards to treasury
         if (unclaimed_amount > 0) {
             let vault = borrow_global_mut<RewardVault<AptosCoin>>(registry_addr);
             let coins = coin::extract(&mut vault.coins, unclaimed_amount);
@@ -1019,7 +1040,6 @@ module poll::poll {
             sent_to_treasury = true;
         };
 
-        // Mark poll as finalized
         poll.status = STATUS_FINALIZED;
 
         event::emit(PollFinalized {
@@ -1029,14 +1049,12 @@ module poll::poll {
         });
     }
 
-    /// Finalize a CLAIMING poll with PULSE rewards
-    /// Can only be called after claim period has elapsed
-    /// Unclaimed rewards are sent to treasury
-    public entry fun finalize_poll_pulse(
+    /// Finalize a CLOSED poll with FA rewards
+    public entry fun finalize_poll_fa(
         account: &signer,
         registry_addr: address,
         poll_id: u64,
-    ) acquires PollRegistry, FARewardVault {
+    ) acquires PollRegistry, GenericFAVault {
         let caller = signer::address_of(account);
         let registry = borrow_global_mut<PollRegistry>(registry_addr);
 
@@ -1044,10 +1062,9 @@ module poll::poll {
 
         let poll = vector::borrow_mut(&mut registry.polls, poll_id);
         assert!(poll.creator == caller, E_NOT_OWNER);
-        assert!(poll.coin_type_id == COIN_TYPE_PULSE, E_COIN_TYPE_MISMATCH);
+        assert!(poll.coin_type_id != COIN_TYPE_APTOS, E_COIN_TYPE_MISMATCH);
         assert!(poll.status == STATUS_CLOSED, E_POLL_NOT_IN_CLAIMING);
 
-        // Check grace period has elapsed since poll was closed
         let current_time = timestamp::now_seconds();
         let finalize_deadline = poll.closed_at + registry.claim_period_secs;
         assert!(current_time >= finalize_deadline, E_CLAIM_PERIOD_NOT_ELAPSED);
@@ -1055,17 +1072,17 @@ module poll::poll {
         let unclaimed_amount = poll.reward_pool;
         let sent_to_treasury = false;
 
-        // Send unclaimed rewards to treasury
         if (unclaimed_amount > 0) {
-            let fa_vault = borrow_global<FARewardVault>(registry_addr);
+            let fa_metadata_address = poll.fa_metadata_address;
+            let fa_vault = borrow_global<GenericFAVault>(registry_addr);
+            let store = smart_table::borrow(&fa_vault.stores, fa_metadata_address);
             let vault_signer = object::generate_signer_for_extending(&fa_vault.extend_ref);
-            let fa = fungible_asset::withdraw(&vault_signer, fa_vault.pulse_store, unclaimed_amount);
+            let fa = fungible_asset::withdraw(&vault_signer, *store, unclaimed_amount);
             primary_fungible_store::deposit(registry.platform_treasury, fa);
             poll.reward_pool = 0;
             sent_to_treasury = true;
         };
 
-        // Mark poll as finalized
         poll.status = STATUS_FINALIZED;
 
         event::emit(PollFinalized {
@@ -1073,6 +1090,86 @@ module poll::poll {
             unclaimed_amount,
             sent_to_treasury,
         });
+    }
+
+    // ============== Backward compatibility functions ==============
+    // These call the generic FA functions for existing code that uses _pulse or _usdc suffixes
+
+    /// Create a new poll with PULSE rewards (backward compatibility)
+    public entry fun create_poll_with_pulse(
+        account: &signer,
+        registry_addr: address,
+        title: String,
+        description: String,
+        options: vector<String>,
+        reward_per_vote: u64,
+        max_voters: u64,
+        duration_secs: u64,
+        fund_amount: u64,
+    ) acquires PollRegistry, GenericFAVault {
+        // Get PULSE metadata address from the pulse module
+        let pulse_metadata = pulse::get_metadata();
+        let pulse_metadata_address = object::object_address(&pulse_metadata);
+
+        create_poll_with_fa(
+            account,
+            registry_addr,
+            title,
+            description,
+            options,
+            reward_per_vote,
+            max_voters,
+            duration_secs,
+            fund_amount,
+            pulse_metadata_address,
+            COIN_TYPE_PULSE,
+        );
+    }
+
+    /// Fund poll with PULSE (backward compatibility)
+    public entry fun fund_poll_with_pulse(
+        account: &signer,
+        registry_addr: address,
+        poll_id: u64,
+        amount: u64,
+    ) acquires PollRegistry, GenericFAVault {
+        fund_poll_with_fa(account, registry_addr, poll_id, amount);
+    }
+
+    /// Claim PULSE reward (backward compatibility)
+    public entry fun claim_reward_pulse(
+        account: &signer,
+        registry_addr: address,
+        poll_id: u64,
+    ) acquires PollRegistry, GenericFAVault {
+        claim_reward_fa(account, registry_addr, poll_id);
+    }
+
+    /// Distribute PULSE rewards (backward compatibility)
+    public entry fun distribute_rewards_pulse(
+        account: &signer,
+        registry_addr: address,
+        poll_id: u64,
+    ) acquires PollRegistry, GenericFAVault {
+        distribute_rewards_fa(account, registry_addr, poll_id);
+    }
+
+    /// Withdraw remaining PULSE (backward compatibility)
+    public entry fun withdraw_remaining_pulse(
+        account: &signer,
+        registry_addr: address,
+        poll_id: u64,
+    ) acquires PollRegistry, GenericFAVault {
+        withdraw_remaining_fa(account, registry_addr, poll_id);
+    }
+
+    /// Finalize poll with PULSE (backward compatibility)
+    public entry fun finalize_poll_pulse(
+        account: &signer,
+        registry_addr: address,
+        poll_id: u64,
+    ) acquires PollRegistry, GenericFAVault {
+        finalize_poll_fa(account, registry_addr, poll_id);
     }
 
     #[view]
@@ -1128,7 +1225,6 @@ module poll::poll {
 
     #[view]
     /// View function to get platform configuration
-    /// Returns: (fee_bps, treasury, total_fees_collected, claim_period_secs)
     public fun get_platform_config(registry_addr: address): (u64, address, u64, u64) acquires PollRegistry {
         let registry = borrow_global<PollRegistry>(registry_addr);
         (registry.platform_fee_bps, registry.platform_treasury, registry.total_fees_collected, registry.claim_period_secs)
@@ -1142,7 +1238,7 @@ module poll::poll {
     }
 
     #[view]
-    /// View function to check if poll can be finalized (claim period elapsed)
+    /// View function to check if poll can be finalized
     public fun can_finalize_poll(registry_addr: address, poll_id: u64): bool acquires PollRegistry {
         let registry = borrow_global<PollRegistry>(registry_addr);
         assert!(poll_id < vector::length(&registry.polls), E_POLL_NOT_FOUND);
@@ -1155,5 +1251,12 @@ module poll::poll {
         let current_time = timestamp::now_seconds();
         let finalize_deadline = poll.closed_at + registry.claim_period_secs;
         current_time >= finalize_deadline
+    }
+
+    #[view]
+    /// View function to check if FA store is initialized for a metadata address
+    public fun is_fa_store_initialized(registry_addr: address, fa_metadata_address: address): bool acquires GenericFAVault {
+        let fa_vault = borrow_global<GenericFAVault>(registry_addr);
+        smart_table::contains(&fa_vault.stores, fa_metadata_address)
     }
 }

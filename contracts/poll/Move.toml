@@ -4,7 +4,7 @@ version = "1.0.0"
 authors = []
 
 [addresses]
-poll = "0x7da34dec279b1e7247a612d017a4b931977ce3bdcdffca54da28c508388c60de"
+poll = "0x100505ee40858fd846a9a3bf7d08deae07a47117027dec4319cb77e0bba51b12"
 pulse = "0x69c7c6752b3426e00fec646270e5b7e9f0efa18bddbd7f112a8e84f7fbe3f737"
 
 [dev-addresses]

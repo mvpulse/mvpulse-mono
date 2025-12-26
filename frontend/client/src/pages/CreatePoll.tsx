@@ -13,7 +13,7 @@ import { useWalletConnection } from "@/hooks/useWalletConnection";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { REWARD_TYPE, PLATFORM_FEE_BPS, calculatePlatformFee, calculateNetAmount, COIN_TYPE } from "@/types/poll";
+import { REWARD_TYPE, PLATFORM_FEE_BPS, calculatePlatformFee, calculateNetAmount } from "@/types/poll";
 import { COIN_TYPES, getCoinSymbol, CoinTypeId } from "@/lib/tokens";
 import { TransactionConfirmationDialog } from "@/components/TransactionConfirmationDialog";
 import { showTransactionSuccessToast, showTransactionErrorToast } from "@/lib/transaction-feedback";
@@ -62,7 +62,7 @@ export default function CreatePoll() {
 
   // Incentives state
   const [rewardType, setRewardType] = useState<number>(REWARD_TYPE.NONE);
-  const [selectedToken, setSelectedToken] = useState<CoinTypeId>(COIN_TYPES.MOVE);
+  const [selectedToken, setSelectedToken] = useState<CoinTypeId>(COIN_TYPES.PULSE);
   // Fixed per vote mode
   const [rewardPerVoter, setRewardPerVoter] = useState("");
   const [targetResponders, setTargetResponders] = useState("");
@@ -473,23 +473,6 @@ export default function CreatePoll() {
                   <div
                     className={cn(
                       "flex items-center space-x-3 rounded-md border p-3 cursor-pointer transition-all",
-                      selectedToken === COIN_TYPES.MOVE
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:bg-muted/50"
-                    )}
-                    onClick={() => setSelectedToken(COIN_TYPES.MOVE)}
-                  >
-                    <RadioGroupItem value={COIN_TYPES.MOVE.toString()} id="token-move" />
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-full bg-blue-500/20 flex items-center justify-center">
-                        <span className="text-xs font-bold text-blue-500">M</span>
-                      </div>
-                      <Label htmlFor="token-move" className="cursor-pointer font-medium">MOVE</Label>
-                    </div>
-                  </div>
-                  <div
-                    className={cn(
-                      "flex items-center space-x-3 rounded-md border p-3 cursor-pointer transition-all",
                       selectedToken === COIN_TYPES.PULSE
                         ? "border-primary bg-primary/5"
                         : "border-border hover:bg-muted/50"
@@ -502,6 +485,23 @@ export default function CreatePoll() {
                         <span className="text-xs font-bold text-purple-500">P</span>
                       </div>
                       <Label htmlFor="token-pulse" className="cursor-pointer font-medium">PULSE</Label>
+                    </div>
+                  </div>
+                  <div
+                    className={cn(
+                      "flex items-center space-x-3 rounded-md border p-3 cursor-pointer transition-all",
+                      selectedToken === COIN_TYPES.USDC
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:bg-muted/50"
+                    )}
+                    onClick={() => setSelectedToken(COIN_TYPES.USDC)}
+                  >
+                    <RadioGroupItem value={COIN_TYPES.USDC.toString()} id="token-usdc" />
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-full bg-green-500/20 flex items-center justify-center">
+                        <span className="text-xs font-bold text-green-500">$</span>
+                      </div>
+                      <Label htmlFor="token-usdc" className="cursor-pointer font-medium">USDC</Label>
                     </div>
                   </div>
                 </RadioGroup>

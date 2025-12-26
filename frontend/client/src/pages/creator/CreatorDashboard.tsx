@@ -20,7 +20,7 @@ import { useContract } from "@/hooks/useContract";
 import { useWalletConnection } from "@/hooks/useWalletConnection";
 import type { PollWithMeta } from "@/types/poll";
 import { POLL_STATUS } from "@/types/poll";
-import { getCoinSymbol, type CoinTypeId } from "@/lib/tokens";
+import { getCoinSymbol, COIN_TYPES, type CoinTypeId } from "@/lib/tokens";
 
 export default function CreatorDashboard() {
   const { isConnected, address } = useWalletConnection();
@@ -63,10 +63,12 @@ export default function CreatorDashboard() {
   const myClosedPolls = myPolls.filter((p) => !p.isActive);
   const myClaimingPolls = myPolls.filter((p) => p.status === POLL_STATUS.CLAIMING);
 
-  // Calculate stats - group funded by token type
+  // Calculate stats - group funded by token type (exclude MOVE, only show PULSE and USDC)
   const stats = useMemo(() => {
     const fundedByToken: Record<string, number> = {};
     myPolls.forEach((p) => {
+      // Skip MOVE (coin_type_id = 0), only aggregate PULSE and USDC
+      if (p.coin_type_id === COIN_TYPES.MOVE) return;
       const coinSymbol = getCoinSymbol(p.coin_type_id as CoinTypeId);
       fundedByToken[coinSymbol] = (fundedByToken[coinSymbol] || 0) + (p.reward_pool / 1e8);
     });

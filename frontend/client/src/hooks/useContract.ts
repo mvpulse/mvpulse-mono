@@ -9,7 +9,7 @@ import {
   submitNativeSponsoredTransaction,
   type TransactionData,
 } from "@/lib/sponsored-transactions";
-import { CoinTypeId, COIN_TYPES } from "@/lib/tokens";
+import { CoinTypeId, COIN_TYPES, getFAMetadataAddress, getTokenStandard } from "@/lib/tokens";
 import { isIndexerOptimizationEnabled } from "@/lib/feature-flags";
 import type { Poll, PollWithMeta, CreatePollInput, VoteInput, TransactionResult, PlatformConfig } from "@/types/poll";
 
@@ -157,6 +157,11 @@ export function useContract() {
     ]
   );
 
+  // Get network type for FA metadata lookup
+  const getNetworkForFA = useCallback((): "testnet" | "mainnet" => {
+    return network === "mainnet" ? "mainnet" : "testnet";
+  }, [network]);
+
   // Create a new poll
   const createPoll = useCallback(
     async (input: CreatePollInput): Promise<TransactionResult> => {
@@ -164,26 +169,67 @@ export function useContract() {
       setError(null);
 
       try {
-        const coinTypeId = input.coinTypeId ?? COIN_TYPES.MOVE;
-        // Use the correct function based on coin type
-        const functionName = coinTypeId === COIN_TYPES.PULSE
-          ? "create_poll_with_pulse"
-          : "create_poll_with_move";
+        const coinTypeId = (input.coinTypeId ?? COIN_TYPES.PULSE) as CoinTypeId;
+        const tokenStandard = getTokenStandard(coinTypeId);
 
-        return await executeTransaction(
-          functionName,
-          [
-            contractAddress, // registry_addr
-            input.title,
-            input.description,
-            input.options,
-            input.rewardPerVote.toString(),
-            input.maxVoters.toString(),
-            input.durationSecs.toString(),
-            input.fundAmount.toString(),
-          ],
-          "Failed to create poll"
-        );
+        if (tokenStandard === "legacy_coin") {
+          // MOVE uses legacy coin function
+          return await executeTransaction(
+            "create_poll_with_move",
+            [
+              contractAddress, // registry_addr
+              input.title,
+              input.description,
+              input.options,
+              input.rewardPerVote.toString(),
+              input.maxVoters.toString(),
+              input.durationSecs.toString(),
+              input.fundAmount.toString(),
+            ],
+            "Failed to create poll"
+          );
+        } else if (coinTypeId === COIN_TYPES.PULSE) {
+          // PULSE uses backward compatibility wrapper (simpler, no metadata needed)
+          return await executeTransaction(
+            "create_poll_with_pulse",
+            [
+              contractAddress, // registry_addr
+              input.title,
+              input.description,
+              input.options,
+              input.rewardPerVote.toString(),
+              input.maxVoters.toString(),
+              input.durationSecs.toString(),
+              input.fundAmount.toString(),
+            ],
+            "Failed to create poll"
+          );
+        } else {
+          // Other FA tokens (USDC, etc.) use generic FA function with metadata address
+          const networkType = getNetworkForFA();
+          const faMetadataAddress = getFAMetadataAddress(coinTypeId, networkType);
+
+          if (!faMetadataAddress) {
+            throw new Error(`FA metadata address not configured for coin type ${coinTypeId}`);
+          }
+
+          return await executeTransaction(
+            "create_poll_with_fa",
+            [
+              contractAddress, // registry_addr
+              input.title,
+              input.description,
+              input.options,
+              input.rewardPerVote.toString(),
+              input.maxVoters.toString(),
+              input.durationSecs.toString(),
+              input.fundAmount.toString(),
+              faMetadataAddress, // fa_metadata_address
+              coinTypeId.toString(), // coin_type_id
+            ],
+            "Failed to create poll"
+          );
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to create poll";
         setError(message);
@@ -192,19 +238,19 @@ export function useContract() {
         setLoading(false);
       }
     },
-    [executeTransaction, contractAddress]
+    [executeTransaction, contractAddress, getNetworkForFA]
   );
 
   // Fund an existing poll
   const fundPoll = useCallback(
-    async (pollId: number, amount: number, coinTypeId: CoinTypeId = COIN_TYPES.MOVE): Promise<TransactionResult> => {
+    async (pollId: number, amount: number, coinTypeId: CoinTypeId = COIN_TYPES.PULSE): Promise<TransactionResult> => {
       setLoading(true);
       setError(null);
 
       try {
-        const functionName = coinTypeId === COIN_TYPES.PULSE
-          ? "fund_poll_with_pulse"
-          : "fund_poll_with_move";
+        const tokenStandard = getTokenStandard(coinTypeId);
+        // MOVE uses legacy coin function, all FA tokens use generic FA function
+        const functionName = tokenStandard === "legacy_coin" ? "fund_poll_with_move" : "fund_poll_with_fa";
 
         return await executeTransaction(
           functionName,
@@ -224,14 +270,14 @@ export function useContract() {
 
   // Claim reward (for Manual Pull mode)
   const claimReward = useCallback(
-    async (pollId: number, coinTypeId: CoinTypeId = COIN_TYPES.MOVE): Promise<TransactionResult> => {
+    async (pollId: number, coinTypeId: CoinTypeId = COIN_TYPES.PULSE): Promise<TransactionResult> => {
       setLoading(true);
       setError(null);
 
       try {
-        const functionName = coinTypeId === COIN_TYPES.PULSE
-          ? "claim_reward_pulse"
-          : "claim_reward_move";
+        const tokenStandard = getTokenStandard(coinTypeId);
+        // MOVE uses legacy coin function, all FA tokens use generic FA function
+        const functionName = tokenStandard === "legacy_coin" ? "claim_reward_move" : "claim_reward_fa";
 
         return await executeTransaction(
           functionName,
@@ -251,14 +297,14 @@ export function useContract() {
 
   // Distribute rewards to all voters (for Manual Push mode)
   const distributeRewards = useCallback(
-    async (pollId: number, coinTypeId: CoinTypeId = COIN_TYPES.MOVE): Promise<TransactionResult> => {
+    async (pollId: number, coinTypeId: CoinTypeId = COIN_TYPES.PULSE): Promise<TransactionResult> => {
       setLoading(true);
       setError(null);
 
       try {
-        const functionName = coinTypeId === COIN_TYPES.PULSE
-          ? "distribute_rewards_pulse"
-          : "distribute_rewards_move";
+        const tokenStandard = getTokenStandard(coinTypeId);
+        // MOVE uses legacy coin function, all FA tokens use generic FA function
+        const functionName = tokenStandard === "legacy_coin" ? "distribute_rewards_move" : "distribute_rewards_fa";
 
         return await executeTransaction(
           functionName,
@@ -278,14 +324,14 @@ export function useContract() {
 
   // Withdraw remaining funds from a poll
   const withdrawRemaining = useCallback(
-    async (pollId: number, coinTypeId: CoinTypeId = COIN_TYPES.MOVE): Promise<TransactionResult> => {
+    async (pollId: number, coinTypeId: CoinTypeId = COIN_TYPES.PULSE): Promise<TransactionResult> => {
       setLoading(true);
       setError(null);
 
       try {
-        const functionName = coinTypeId === COIN_TYPES.PULSE
-          ? "withdraw_remaining_pulse"
-          : "withdraw_remaining_move";
+        const tokenStandard = getTokenStandard(coinTypeId);
+        // MOVE uses legacy coin function, all FA tokens use generic FA function
+        const functionName = tokenStandard === "legacy_coin" ? "withdraw_remaining_move" : "withdraw_remaining_fa";
 
         return await executeTransaction(
           functionName,
@@ -305,14 +351,14 @@ export function useContract() {
 
   // Finalize a poll (after claim period, sends unclaimed rewards to treasury)
   const finalizePoll = useCallback(
-    async (pollId: number, coinTypeId: CoinTypeId = COIN_TYPES.MOVE): Promise<TransactionResult> => {
+    async (pollId: number, coinTypeId: CoinTypeId = COIN_TYPES.PULSE): Promise<TransactionResult> => {
       setLoading(true);
       setError(null);
 
       try {
-        const functionName = coinTypeId === COIN_TYPES.PULSE
-          ? "finalize_poll_pulse"
-          : "finalize_poll_move";
+        const tokenStandard = getTokenStandard(coinTypeId);
+        // MOVE uses legacy coin function, all FA tokens use generic FA function
+        const functionName = tokenStandard === "legacy_coin" ? "finalize_poll_move" : "finalize_poll_fa";
 
         return await executeTransaction(
           functionName,

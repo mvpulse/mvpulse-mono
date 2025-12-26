@@ -116,11 +116,13 @@ export default function ParticipantDashboard() {
     return polls.filter((p) => p.isActive && !votedPollIds.has(p.id));
   }, [polls, votedPollIds]);
 
-  // Calculate stats - group rewards by token type
+  // Calculate stats - group rewards by token type (exclude MOVE, only show PULSE and USDC)
   const stats = useMemo(() => {
     // Group pending rewards by coin type
     const pendingByToken: Record<string, number> = {};
     claimablePolls.forEach((p) => {
+      // Skip MOVE (coin_type_id = 0), only aggregate PULSE and USDC
+      if (p.coin_type_id === COIN_TYPES.MOVE) return;
       const perVoter = p.reward_per_vote > 0
         ? p.reward_per_vote / 1e8
         : p.totalVotes > 0
@@ -133,6 +135,8 @@ export default function ParticipantDashboard() {
     // Group claimed rewards by coin type (polls user has voted on and claimed)
     const earnedByToken: Record<string, number> = {};
     votedPolls.forEach((p) => {
+      // Skip MOVE (coin_type_id = 0), only aggregate PULSE and USDC
+      if (p.coin_type_id === COIN_TYPES.MOVE) return;
       if (claimedPollIds.has(p.id) && p.reward_pool > 0) {
         const perVoter = p.reward_per_vote > 0
           ? p.reward_per_vote / 1e8

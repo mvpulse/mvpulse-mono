@@ -18,7 +18,7 @@ import {
 import { useContract } from "@/hooks/useContract";
 import { useWalletConnection } from "@/hooks/useWalletConnection";
 import type { PollWithMeta } from "@/types/poll";
-import { getCoinSymbol, type CoinTypeId } from "@/lib/tokens";
+import { getCoinSymbol, COIN_TYPES, type CoinTypeId } from "@/lib/tokens";
 
 // Local storage key for tracking user's fundings
 const FUNDING_HISTORY_KEY = "mvpulse_funding_history";
@@ -91,10 +91,12 @@ export default function DonorDashboard() {
     return polls.filter((p) => p.isActive);
   }, [polls]);
 
-  // Calculate stats - group by token type
+  // Calculate stats - group by token type (exclude MOVE, only show PULSE and USDC)
   const stats = useMemo(() => {
     const fundedByToken: Record<string, number> = {};
     fundingHistory.forEach((f) => {
+      // Skip MOVE (coin_type_id = 0), only aggregate PULSE and USDC
+      if (f.coinTypeId === COIN_TYPES.MOVE) return;
       const coinSymbol = getCoinSymbol(f.coinTypeId as CoinTypeId);
       fundedByToken[coinSymbol] = (fundedByToken[coinSymbol] || 0) + (f.amount / 1e8);
     });
@@ -107,8 +109,8 @@ export default function DonorDashboard() {
     };
   }, [fundingHistory, fundedPollIds, fundedPolls]);
 
-  // Render poll card
-  const renderPollCard = (poll: PollWithMeta) => {
+  // Render poll card with optional action label
+  const renderPollCard = (poll: PollWithMeta, actionLabel?: string) => {
     const rewardPool = poll.reward_pool / 1e8;
     const coinSymbol = getCoinSymbol(poll.coin_type_id as CoinTypeId);
     return (
@@ -122,6 +124,7 @@ export default function DonorDashboard() {
         reward={rewardPool > 0 ? `${rewardPool.toFixed(2)} ${coinSymbol}` : undefined}
         status={poll.isActive ? "active" : "closed"}
         tags={[]}
+        actionLabel={actionLabel}
       />
     );
   };
@@ -261,7 +264,7 @@ export default function DonorDashboard() {
           </Card>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {fundedPolls.slice(0, 3).map(renderPollCard)}
+            {fundedPolls.slice(0, 3).map((poll) => renderPollCard(poll))}
           </div>
         )}
       </div>
@@ -301,7 +304,7 @@ export default function DonorDashboard() {
             {pollsNeedingFunding
               .filter((p) => !fundedPollIds.has(p.id))
               .slice(0, 6)
-              .map(renderPollCard)}
+              .map((poll) => renderPollCard(poll, "Fund"))}
           </div>
         )}
       </div>

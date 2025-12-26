@@ -184,7 +184,7 @@ export default function PollDetails() {
     }
   };
 
-  const handleShare = () => {
+  const handleShare = async () => {
     // Include referral code in the shared URL if user is connected
     let shareUrl = window.location.href;
     if (referralCode && isConnected) {
@@ -192,8 +192,13 @@ export default function PollDetails() {
       url.searchParams.set("ref", referralCode);
       shareUrl = url.toString();
     }
-    navigator.clipboard.writeText(shareUrl);
-    toast.success(referralCode ? "Referral link copied!" : "Link copied to clipboard!");
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      toast.success(referralCode ? "Referral link copied to clipboard!" : "Link copied to clipboard!");
+    } catch (error) {
+      console.error("Failed to copy to clipboard:", error);
+      toast.error("Failed to copy link to clipboard");
+    }
   };
 
   // Handle claiming reward (for Manual Pull mode)

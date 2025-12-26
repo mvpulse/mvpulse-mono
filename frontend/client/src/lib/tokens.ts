@@ -20,6 +20,12 @@ const PULSE_ADDRESSES: Record<"testnet" | "mainnet", string> = {
   mainnet: import.meta.env.VITE_MAINNET_PULSE_CONTRACT_ADDRESS || "",
 };
 
+// PULSE FA Metadata addresses (different from contract address)
+const PULSE_METADATA_ADDRESSES: Record<"testnet" | "mainnet", string> = {
+  testnet: import.meta.env.VITE_TESTNET_PULSE_METADATA_ADDRESS || "",
+  mainnet: import.meta.env.VITE_MAINNET_PULSE_METADATA_ADDRESS || "",
+};
+
 const USDC_ADDRESSES: Record<"testnet" | "mainnet", string> = {
   testnet: import.meta.env.VITE_TESTNET_USDC_CONTRACT_ADDRESS || "",
   mainnet: import.meta.env.VITE_MAINNET_USDC_CONTRACT_ADDRESS || "",
@@ -53,7 +59,7 @@ export function getTokenStandard(coinTypeId: CoinTypeId): TokenStandard {
 
 /**
  * Get the FA metadata address for a Fungible Asset token
- * For PULSE: Returns the deterministic address based on the named object seed
+ * For PULSE: Returns the metadata object address (created via named_object)
  * For USDC: Returns the contract address (USDC.e FA metadata is at its contract address)
  */
 export function getFAMetadataAddress(
@@ -62,16 +68,9 @@ export function getFAMetadataAddress(
 ): string {
   switch (coinTypeId) {
     case COIN_TYPES.PULSE: {
-      // PULSE FA metadata address is derived from the contract address and seed "PULSE_TOKEN"
-      // The address is deterministic: sha3_256(contract_address + 0xFE + "PULSE_TOKEN")
-      // For now, we'll use the view function approach to get the actual address
-      // The metadata address will be queried via `pulse::get_metadata_address` view function
-      const pulseAddress = PULSE_ADDRESSES[network];
-      if (!pulseAddress) {
-        return "";
-      }
-      // Return the contract address - we'll use view function to get actual metadata
-      return pulseAddress;
+      // PULSE FA metadata is at a named object address (not the contract address)
+      const pulseMetadataAddress = PULSE_METADATA_ADDRESSES[network];
+      return pulseMetadataAddress || "";
     }
     case COIN_TYPES.USDC: {
       // USDC.e FA metadata is at the contract address itself

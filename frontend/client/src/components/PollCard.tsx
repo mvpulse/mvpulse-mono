@@ -15,11 +15,14 @@ interface PollProps {
   status: "active" | "closed" | "draft";
   tags: string[];
   hasVoted?: boolean;
+  actionLabel?: string; // Custom button text (e.g., "Fund" for donors, "Participate" for participants)
 }
 
-export function PollCard({ id, title, description, votes, timeLeft, reward, status, tags, hasVoted }: PollProps) {
-  // Show "View Results" if user has voted or poll is closed
-  const buttonText = hasVoted || status === "closed" ? "View Results" : "Participate";
+export function PollCard({ id, title, description, votes, timeLeft, reward, status, tags, hasVoted, actionLabel }: PollProps) {
+  // Determine button text: custom label > "View Results" if voted/closed > default "Participate"
+  const buttonText = status === "closed" || hasVoted
+    ? "View Results"
+    : actionLabel || "Participate";
 
   return (
     <Card className="group relative overflow-hidden border-border/50 hover:border-primary/50 transition-all duration-300 hover:shadow-lg hover:shadow-primary/5 bg-card/50 backdrop-blur-sm">
