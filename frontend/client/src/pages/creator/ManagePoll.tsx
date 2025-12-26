@@ -200,6 +200,8 @@ export default function ManagePoll() {
         return <Badge className="bg-yellow-500/20 text-yellow-500 border-yellow-500/50">Claiming</Badge>;
       case POLL_STATUS.CLOSED:
         return <Badge variant="secondary">Closed</Badge>;
+      case POLL_STATUS.FINALIZED:
+        return <Badge className="bg-blue-500/20 text-blue-500 border-blue-500/50">Finalized</Badge>;
       default:
         return <Badge variant="secondary">Unknown</Badge>;
     }

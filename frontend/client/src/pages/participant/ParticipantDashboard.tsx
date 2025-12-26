@@ -174,7 +174,7 @@ export default function ParticipantDashboard() {
   };
 
   // Render poll card
-  const renderPollCard = (poll: PollWithMeta) => {
+  const renderPollCard = (poll: PollWithMeta, hasVoted: boolean = false) => {
     const rewardPool = poll.reward_pool / 1e8;
     const coinSymbol = getCoinSymbol(poll.coin_type_id as CoinTypeId);
     return (
@@ -188,6 +188,7 @@ export default function ParticipantDashboard() {
         reward={rewardPool > 0 ? `${rewardPool.toFixed(2)} ${coinSymbol}` : undefined}
         status={poll.isActive ? "active" : "closed"}
         tags={[]}
+        hasVoted={hasVoted}
       />
     );
   };
@@ -394,7 +395,7 @@ export default function ParticipantDashboard() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {votedPolls.slice(0, 3).map((poll) => (
               <div key={poll.id} className="relative">
-                {renderPollCard(poll)}
+                {renderPollCard(poll, true)}
                 <Badge className="absolute top-3 right-3 bg-primary/80">
                   Voted
                 </Badge>
@@ -432,7 +433,7 @@ export default function ParticipantDashboard() {
             {availablePolls
               .filter((p) => p.reward_pool > 0)
               .slice(0, 6)
-              .map(renderPollCard)}
+              .map((poll) => renderPollCard(poll, false))}
           </div>
         )}
       </div>

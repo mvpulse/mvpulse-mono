@@ -14,9 +14,13 @@ interface PollProps {
   reward?: string;
   status: "active" | "closed" | "draft";
   tags: string[];
+  hasVoted?: boolean;
 }
 
-export function PollCard({ id, title, description, votes, timeLeft, reward, status, tags }: PollProps) {
+export function PollCard({ id, title, description, votes, timeLeft, reward, status, tags, hasVoted }: PollProps) {
+  // Show "View Results" if user has voted or poll is closed
+  const buttonText = hasVoted || status === "closed" ? "View Results" : "Participate";
+
   return (
     <Card className="group relative overflow-hidden border-border/50 hover:border-primary/50 transition-all duration-300 hover:shadow-lg hover:shadow-primary/5 bg-card/50 backdrop-blur-sm">
       {status === "active" && (
@@ -61,7 +65,7 @@ export function PollCard({ id, title, description, votes, timeLeft, reward, stat
       <CardFooter className="pt-0">
         <Link href={`/poll/${id}`}>
           <Button className="w-full group-hover:bg-primary group-hover:text-primary-foreground transition-all" variant="secondary">
-            Participate <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />
+            {buttonText} <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />
           </Button>
         </Link>
       </CardFooter>
