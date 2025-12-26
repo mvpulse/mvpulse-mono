@@ -69,7 +69,7 @@ export function useContract() {
   const executeTransaction = useCallback(
     async (
       functionName: string,
-      functionArguments: (string | number | boolean | string[])[],
+      functionArguments: (string | number | boolean | string[] | string[][])[],
       errorMessage: string,
       typeArguments: string[] = []
     ): Promise<TransactionResultWithSponsorship> => {
@@ -239,6 +239,119 @@ export function useContract() {
       }
     },
     [executeTransaction, contractAddress, getNetworkForFA]
+  );
+
+  // Create multiple polls in a single atomic transaction
+  // Returns the poll IDs from the batch event
+  const createPollsBatch = useCallback(
+    async (inputs: CreatePollInput[]): Promise<TransactionResultWithSponsorship & { pollIds: number[] }> => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        if (inputs.length === 0) {
+          throw new Error("At least one poll is required for batch creation");
+        }
+
+        // All polls in a batch must use the same token type
+        const coinTypeId = (inputs[0].coinTypeId ?? COIN_TYPES.PULSE) as CoinTypeId;
+        const tokenStandard = getTokenStandard(coinTypeId);
+
+        // Validate all polls use the same token type
+        for (const input of inputs) {
+          if ((input.coinTypeId ?? COIN_TYPES.PULSE) !== coinTypeId) {
+            throw new Error("All polls in a batch must use the same token type");
+          }
+        }
+
+        // Prepare parallel arrays for the contract call
+        const titles = inputs.map(p => p.title);
+        const descriptions = inputs.map(p => p.description);
+        const optionsList = inputs.map(p => p.options);
+        const rewardPerVotes = inputs.map(p => p.rewardPerVote.toString());
+        const maxVotersList = inputs.map(p => p.maxVoters.toString());
+        const durationSecsList = inputs.map(p => p.durationSecs.toString());
+        const fundAmounts = inputs.map(p => p.fundAmount.toString());
+
+        let result: TransactionResultWithSponsorship;
+
+        if (tokenStandard === "legacy_coin") {
+          // MOVE uses legacy coin batch function
+          result = await executeTransaction(
+            "create_polls_batch_with_move",
+            [
+              contractAddress, // registry_addr
+              titles,
+              descriptions,
+              optionsList,
+              rewardPerVotes,
+              maxVotersList,
+              durationSecsList,
+              fundAmounts,
+            ],
+            "Failed to create polls batch"
+          );
+        } else {
+          // FA tokens use generic FA batch function with metadata address
+          const networkType = getNetworkForFA();
+          const faMetadataAddress = getFAMetadataAddress(coinTypeId, networkType);
+
+          if (!faMetadataAddress) {
+            throw new Error(`FA metadata address not configured for coin type ${coinTypeId}`);
+          }
+
+          result = await executeTransaction(
+            "create_polls_batch_with_fa",
+            [
+              contractAddress, // registry_addr
+              titles,
+              descriptions,
+              optionsList,
+              rewardPerVotes,
+              maxVotersList,
+              durationSecsList,
+              fundAmounts,
+              faMetadataAddress, // fa_metadata_address
+              coinTypeId.toString(), // coin_type_id
+            ],
+            "Failed to create polls batch"
+          );
+        }
+
+        // Parse poll IDs from transaction events
+        // The PollsBatchCreated event contains the poll_ids vector
+        let pollIds: number[] = [];
+        try {
+          const txResponse = await client.waitForTransaction({
+            transactionHash: result.hash,
+            options: { checkSuccess: true },
+          });
+
+          // Look for PollsBatchCreated event in the transaction
+          if ('events' in txResponse && Array.isArray(txResponse.events)) {
+            const batchEvent = txResponse.events.find(
+              (e: { type: string }) => e.type.includes("::poll::PollsBatchCreated")
+            );
+            if (batchEvent && 'data' in batchEvent && batchEvent.data) {
+              const eventData = batchEvent.data as { poll_ids?: string[] };
+              pollIds = (eventData.poll_ids || []).map((id: string) => parseInt(id, 10));
+            }
+          }
+        } catch (parseErr) {
+          console.error("Failed to parse poll IDs from event:", parseErr);
+          // Return empty array if parsing fails - caller should refetch polls
+        }
+
+        return { ...result, pollIds };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to create polls batch";
+        setError(message);
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [executeTransaction, contractAddress, getNetworkForFA, client]
   );
 
   // Fund an existing poll
@@ -458,6 +571,280 @@ export function useContract() {
     [executeTransaction, contractAddress]
   );
 
+  // Bulk vote on multiple polls atomically (for questionnaires)
+  const bulkVote = useCallback(
+    async (pollIds: number[], optionIndices: number[]): Promise<TransactionResult> => {
+      setLoading(true);
+      setError(null);
+
+      if (pollIds.length !== optionIndices.length) {
+        throw new Error("Poll IDs and option indices must have the same length");
+      }
+
+      if (pollIds.length === 0) {
+        throw new Error("At least one vote is required");
+      }
+
+      try {
+        return await executeTransaction(
+          "bulk_vote",
+          [
+            contractAddress, // registry_addr
+            pollIds.map(id => id.toString()),
+            optionIndices.map(idx => idx.toString()),
+          ],
+          "Failed to submit bulk votes"
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to submit bulk votes";
+        setError(message);
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [executeTransaction, contractAddress]
+  );
+
+  // ============================================
+  // Questionnaire Pool Functions (Shared Rewards)
+  // ============================================
+
+  // Create a questionnaire-level shared reward pool
+  const createQuestionnairePool = useCallback(
+    async (
+      pollIds: number[],
+      rewardPerCompletion: number, // 0 = equal split
+      maxCompleters: number, // 0 = unlimited
+      durationSecs: number,
+      fundAmount: number,
+      faMetadataAddress: string,
+      coinTypeId: CoinTypeId
+    ): Promise<TransactionResult> => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        return await executeTransaction(
+          "create_questionnaire_pool_with_fa",
+          [
+            contractAddress,
+            pollIds.map(id => id.toString()),
+            rewardPerCompletion.toString(),
+            maxCompleters.toString(),
+            durationSecs.toString(),
+            fundAmount.toString(),
+            faMetadataAddress,
+            coinTypeId.toString(),
+          ],
+          "Failed to create questionnaire pool"
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to create questionnaire pool";
+        setError(message);
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [executeTransaction, contractAddress]
+  );
+
+  // Mark user as having completed a questionnaire (after bulk_vote)
+  const markQuestionnaireCompleted = useCallback(
+    async (questionnaireId: number): Promise<TransactionResult> => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        return await executeTransaction(
+          "mark_questionnaire_completed",
+          [contractAddress, questionnaireId.toString()],
+          "Failed to mark questionnaire completed"
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to mark questionnaire completed";
+        setError(message);
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [executeTransaction, contractAddress]
+  );
+
+  // Start questionnaire claiming period (creator only)
+  const startQuestionnaireClaims = useCallback(
+    async (questionnaireId: number): Promise<TransactionResult> => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        return await executeTransaction(
+          "start_questionnaire_claims",
+          [contractAddress, questionnaireId.toString()],
+          "Failed to start questionnaire claims"
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to start questionnaire claims";
+        setError(message);
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [executeTransaction, contractAddress]
+  );
+
+  // Claim questionnaire-level reward (shared pool)
+  const claimQuestionnaireReward = useCallback(
+    async (questionnaireId: number): Promise<TransactionResult> => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        return await executeTransaction(
+          "claim_questionnaire_reward_fa",
+          [contractAddress, questionnaireId.toString()],
+          "Failed to claim questionnaire reward"
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to claim questionnaire reward";
+        setError(message);
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [executeTransaction, contractAddress]
+  );
+
+  // Check if user has completed all polls in a questionnaire (view function)
+  const hasCompletedQuestionnaire = useCallback(
+    async (questionnaireId: number, userAddress?: string): Promise<boolean> => {
+      const address = userAddress || activeAddress;
+      if (!contractAddress || !address) return false;
+
+      try {
+        const result = await client.view({
+          payload: {
+            function: getFunctionId(contractAddress, "has_completed_questionnaire"),
+            typeArguments: [],
+            functionArguments: [contractAddress, questionnaireId.toString(), address],
+          },
+        });
+
+        return Boolean(result && result[0]);
+      } catch (err) {
+        console.error("Failed to check questionnaire completion:", err);
+        return false;
+      }
+    },
+    [client, contractAddress, activeAddress]
+  );
+
+  // Get questionnaire pool details (view function)
+  const getQuestionnairePool = useCallback(
+    async (questionnaireId: number): Promise<{
+      id: number;
+      creator: string;
+      poll_ids: number[];
+      reward_pool: number;
+      reward_per_completion: number;
+      max_completers: number;
+      completers: string[];
+      claimed: string[];
+      coin_type_id: number;
+      fa_metadata_address: string;
+      status: number;
+      end_time: number;
+      closed_at: number;
+    } | null> => {
+      if (!contractAddress) return null;
+
+      try {
+        const result = await client.view({
+          payload: {
+            function: getFunctionId(contractAddress, "get_questionnaire_pool"),
+            typeArguments: [],
+            functionArguments: [contractAddress, questionnaireId.toString()],
+          },
+        });
+
+        if (result && result[0]) {
+          const pool = result[0] as any;
+          return {
+            id: Number(pool.id),
+            creator: pool.creator,
+            poll_ids: pool.poll_ids.map((id: string) => Number(id)),
+            reward_pool: Number(pool.reward_pool),
+            reward_per_completion: Number(pool.reward_per_completion),
+            max_completers: Number(pool.max_completers),
+            completers: pool.completers,
+            claimed: pool.claimed,
+            coin_type_id: Number(pool.coin_type_id),
+            fa_metadata_address: pool.fa_metadata_address,
+            status: Number(pool.status),
+            end_time: Number(pool.end_time),
+            closed_at: Number(pool.closed_at),
+          };
+        }
+        return null;
+      } catch (err) {
+        console.error("Failed to get questionnaire pool:", err);
+        return null;
+      }
+    },
+    [client, contractAddress]
+  );
+
+  // Get questionnaire pool count (view function)
+  const getQuestionnairePoolCount = useCallback(async (): Promise<number> => {
+    if (!contractAddress) return 0;
+
+    try {
+      const result = await client.view({
+        payload: {
+          function: getFunctionId(contractAddress, "get_questionnaire_pool_count"),
+          typeArguments: [],
+          functionArguments: [contractAddress],
+        },
+      });
+
+      if (result && result[0] !== undefined) {
+        return Number(result[0]);
+      }
+      return 0;
+    } catch (err) {
+      console.error("Failed to get questionnaire pool count:", err);
+      return 0;
+    }
+  }, [client, contractAddress]);
+
+  // Check if user has claimed questionnaire reward (view function)
+  const hasClaimedQuestionnaire = useCallback(
+    async (questionnaireId: number, userAddress?: string): Promise<boolean> => {
+      const address = userAddress || activeAddress;
+      if (!contractAddress || !address) return false;
+
+      try {
+        const result = await client.view({
+          payload: {
+            function: getFunctionId(contractAddress, "has_claimed_questionnaire"),
+            typeArguments: [],
+            functionArguments: [contractAddress, questionnaireId.toString(), address],
+          },
+        });
+
+        return Boolean(result && result[0]);
+      } catch (err) {
+        console.error("Failed to check questionnaire claim status:", err);
+        return false;
+      }
+    },
+    [client, contractAddress, activeAddress]
+  );
+
   // Get a single poll by ID (view function)
   const getPoll = useCallback(
     async (pollId: number): Promise<PollWithMeta | null> => {
@@ -665,7 +1052,9 @@ export function useContract() {
 
     // Write functions
     createPoll,
+    createPollsBatch,
     vote,
+    bulkVote,
     startClaims,
     closePoll,
     fundPoll,
@@ -673,6 +1062,12 @@ export function useContract() {
     distributeRewards,
     withdrawRemaining,
     finalizePoll,
+
+    // Questionnaire pool write functions
+    createQuestionnairePool,
+    markQuestionnaireCompleted,
+    startQuestionnaireClaims,
+    claimQuestionnaireReward,
 
     // Read functions
     getPoll,
@@ -683,6 +1078,12 @@ export function useContract() {
     getPlatformConfig,
     getClaimPeriod,
     canFinalizePoll,
+
+    // Questionnaire pool read functions
+    hasCompletedQuestionnaire,
+    getQuestionnairePool,
+    getQuestionnairePoolCount,
+    hasClaimedQuestionnaire,
 
     // Helpers
     enrichPoll,

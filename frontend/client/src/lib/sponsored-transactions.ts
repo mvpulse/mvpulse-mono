@@ -21,7 +21,7 @@ export interface SponsoredTransactionResult {
 export interface TransactionData {
   function: `${string}::${string}::${string}`;
   typeArguments: string[];
-  functionArguments: (string | number | boolean | string[])[];
+  functionArguments: (string | number | boolean | string[] | string[][])[];
 }
 
 export interface SignRawHashFunction {

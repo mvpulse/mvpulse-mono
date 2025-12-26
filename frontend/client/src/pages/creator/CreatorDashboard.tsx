@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { Link } from "wouter";
 import { CreatorLayout } from "@/components/layouts/CreatorLayout";
 import { PollCard } from "@/components/PollCard";
+import { QuestionnaireCard } from "@/components/questionnaire";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -14,10 +15,12 @@ import {
   RefreshCcw,
   AlertCircle,
   TrendingUp,
-  ArrowUpRight
+  ArrowUpRight,
+  ClipboardList
 } from "lucide-react";
 import { useContract } from "@/hooks/useContract";
 import { useWalletConnection } from "@/hooks/useWalletConnection";
+import { useQuestionnaires } from "@/hooks/useQuestionnaire";
 import type { PollWithMeta } from "@/types/poll";
 import { POLL_STATUS } from "@/types/poll";
 import { getCoinSymbol, COIN_TYPES, type CoinTypeId } from "@/lib/tokens";
@@ -28,6 +31,16 @@ export default function CreatorDashboard() {
 
   const [polls, setPolls] = useState<PollWithMeta[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Fetch questionnaires created by this user
+  const {
+    data: questionnaires,
+    isLoading: isLoadingQuestionnaires,
+    refetch: refetchQuestionnaires,
+  } = useQuestionnaires({
+    creator: address || undefined,
+    limit: 6,
+  });
 
   // Fetch polls
   const fetchPolls = useCallback(async () => {
@@ -306,6 +319,78 @@ export default function CreatorDashboard() {
               <Link href="/creator/manage">
                 <Button variant="outline">
                   View All Polls <ArrowUpRight className="w-4 h-4 ml-2" />
+                </Button>
+              </Link>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Recent Questionnaires */}
+      <div className="flex items-center justify-between mb-4 mt-12">
+        <h2 className="text-xl font-semibold flex items-center gap-2">
+          <ClipboardList className="w-5 h-5" />
+          Recent Questionnaires
+        </h2>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => refetchQuestionnaires()}>
+            <RefreshCcw className="w-4 h-4 mr-2" /> Refresh
+          </Button>
+          <Link href="/questionnaire/create">
+            <Button size="sm">
+              <Plus className="w-4 h-4 mr-2" /> Create Questionnaire
+            </Button>
+          </Link>
+        </div>
+      </div>
+
+      {isLoadingQuestionnaires ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <Skeleton className="h-48 w-full rounded-xl" />
+          <Skeleton className="h-48 w-full rounded-xl" />
+          <Skeleton className="h-48 w-full rounded-xl" />
+        </div>
+      ) : !questionnaires || questionnaires.length === 0 ? (
+        <Card className="border-dashed">
+          <CardContent className="flex flex-col items-center justify-center py-12">
+            <ClipboardList className="w-12 h-12 text-muted-foreground mb-4" />
+            <p className="text-muted-foreground mb-4">
+              You haven't created any questionnaires yet.
+            </p>
+            <p className="text-sm text-muted-foreground mb-4">
+              Questionnaires let you group multiple polls together with shared rewards.
+            </p>
+            <Link href="/questionnaire/create">
+              <Button>
+                <Plus className="w-4 h-4 mr-2" /> Create Your First Questionnaire
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {questionnaires.map((q) => (
+              <QuestionnaireCard
+                key={q.id}
+                questionnaire={q}
+                showCreatorActions
+                onEdit={(id) => {
+                  // Navigate to edit page (future implementation)
+                  window.location.href = `/creator/questionnaires/${id}`;
+                }}
+                onArchive={(id) => {
+                  // Archive functionality (future implementation)
+                  console.log("Archive questionnaire:", id);
+                }}
+              />
+            ))}
+          </div>
+          {questionnaires.length >= 6 && (
+            <div className="mt-6 text-center">
+              <Link href="/creator/questionnaires">
+                <Button variant="outline">
+                  View All Questionnaires <ArrowUpRight className="w-4 h-4 ml-2" />
                 </Button>
               </Link>
             </div>

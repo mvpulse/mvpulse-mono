@@ -16,6 +16,9 @@ import {
   referrals,
   referralMilestones,
   referralStats,
+  questionnaires,
+  questionnairePolls,
+  questionnaireProgress,
   TIERS,
   TIER_VOTE_LIMITS,
   TIER_PULSE_THRESHOLDS,
@@ -27,9 +30,14 @@ import {
   REFERRAL_TIERS,
   REFERRAL_TIER_THRESHOLDS,
   REFERRAL_TIER_MULTIPLIERS,
+  QUESTIONNAIRE_STATUS,
+  QUESTIONNAIRE_REWARD_TYPE,
   type UserProfile,
   type Season,
   type Quest,
+  type Questionnaire,
+  type QuestionnairePoll,
+  type QuestionnaireProgress,
 } from "@shared/schema";
 
 // ============================================
@@ -1615,6 +1623,731 @@ export async function registerRoutes(
       }
     }
   }
+
+  // ============================================
+  // Questionnaire System Endpoints
+  // ============================================
+
+  /**
+   * GET /api/questionnaires
+   * List questionnaires with optional filters
+   */
+  app.get("/api/questionnaires", async (req, res) => {
+    try {
+      const { status, creator, category, limit: limitParam, offset: offsetParam } = req.query;
+      const limit = parseInt(limitParam as string) || 20;
+      const offset = parseInt(offsetParam as string) || 0;
+
+      // Build conditions array
+      const conditions = [];
+      if (status !== undefined) {
+        conditions.push(eq(questionnaires.status, parseInt(status as string)));
+      }
+      if (creator) {
+        conditions.push(eq(questionnaires.creatorAddress, (creator as string).toLowerCase()));
+      }
+      if (category) {
+        conditions.push(eq(questionnaires.category, category as string));
+      }
+
+      let result;
+      if (conditions.length > 0) {
+        result = await db
+          .select()
+          .from(questionnaires)
+          .where(conditions.length === 1 ? conditions[0] : and(...conditions))
+          .orderBy(desc(questionnaires.createdAt))
+          .limit(limit)
+          .offset(offset);
+      } else {
+        result = await db
+          .select()
+          .from(questionnaires)
+          .orderBy(desc(questionnaires.createdAt))
+          .limit(limit)
+          .offset(offset);
+      }
+
+      res.json({ success: true, data: result });
+    } catch (error) {
+      console.error("Error fetching questionnaires:", error);
+      res.status(500).json({ success: false, error: "Failed to fetch questionnaires" });
+    }
+  });
+
+  /**
+   * GET /api/questionnaires/:id
+   * Get questionnaire details
+   */
+  app.get("/api/questionnaires/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const [questionnaire] = await db
+        .select()
+        .from(questionnaires)
+        .where(eq(questionnaires.id, id))
+        .limit(1);
+
+      if (!questionnaire) {
+        return res.status(404).json({ success: false, error: "Questionnaire not found" });
+      }
+
+      // Get polls in this questionnaire
+      const polls = await db
+        .select()
+        .from(questionnairePolls)
+        .where(eq(questionnairePolls.questionnaireId, id))
+        .orderBy(questionnairePolls.sortOrder);
+
+      res.json({
+        success: true,
+        data: {
+          ...questionnaire,
+          polls,
+        },
+      });
+    } catch (error) {
+      console.error("Error fetching questionnaire:", error);
+      res.status(500).json({ success: false, error: "Failed to fetch questionnaire" });
+    }
+  });
+
+  /**
+   * GET /api/questionnaires/:id/polls
+   * Get polls in a questionnaire
+   */
+  app.get("/api/questionnaires/:id/polls", async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const polls = await db
+        .select()
+        .from(questionnairePolls)
+        .where(eq(questionnairePolls.questionnaireId, id))
+        .orderBy(questionnairePolls.sortOrder);
+
+      res.json({ success: true, data: polls });
+    } catch (error) {
+      console.error("Error fetching questionnaire polls:", error);
+      res.status(500).json({ success: false, error: "Failed to fetch polls" });
+    }
+  });
+
+  /**
+   * POST /api/questionnaires
+   * Create a new questionnaire
+   */
+  app.post("/api/questionnaires", async (req, res) => {
+    try {
+      const {
+        creatorAddress,
+        title,
+        description,
+        category,
+        startTime,
+        endTime,
+        rewardType,
+        totalRewardAmount,
+        coinTypeId,
+        rewardPerCompletion,
+        maxCompleters,
+        settings,
+        pollIds, // Optional: array of poll IDs to add initially
+      } = req.body;
+
+      if (!creatorAddress || !title || !startTime || !endTime) {
+        return res.status(400).json({ success: false, error: "Missing required fields" });
+      }
+
+      const normalizedCreator = creatorAddress.toLowerCase();
+
+      // Create questionnaire
+      const [newQuestionnaire] = await db
+        .insert(questionnaires)
+        .values({
+          creatorAddress: normalizedCreator,
+          title,
+          description,
+          category,
+          startTime: new Date(startTime),
+          endTime: new Date(endTime),
+          rewardType: rewardType ?? QUESTIONNAIRE_REWARD_TYPE.PER_POLL,
+          totalRewardAmount: totalRewardAmount?.toString() || "0",
+          coinTypeId: coinTypeId ?? 0,
+          rewardPerCompletion: rewardPerCompletion?.toString() || "0",
+          maxCompleters: maxCompleters || null,
+          settings: settings || {},
+          status: QUESTIONNAIRE_STATUS.DRAFT,
+          pollCount: 0,
+          completionCount: 0,
+        })
+        .returning();
+
+      // Add initial polls if provided
+      if (pollIds && Array.isArray(pollIds) && pollIds.length > 0) {
+        const pollValues = pollIds.map((pollId: number, index: number) => ({
+          questionnaireId: newQuestionnaire.id,
+          pollId,
+          sortOrder: index,
+          source: "existing",
+        }));
+
+        await db.insert(questionnairePolls).values(pollValues);
+
+        // Update poll count
+        await db
+          .update(questionnaires)
+          .set({ pollCount: pollIds.length, updatedAt: new Date() })
+          .where(eq(questionnaires.id, newQuestionnaire.id));
+
+        newQuestionnaire.pollCount = pollIds.length;
+      }
+
+      res.json({ success: true, data: newQuestionnaire });
+    } catch (error) {
+      console.error("Error creating questionnaire:", error);
+      res.status(500).json({ success: false, error: "Failed to create questionnaire" });
+    }
+  });
+
+  /**
+   * PUT /api/questionnaires/:id
+   * Update a questionnaire
+   */
+  app.put("/api/questionnaires/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const {
+        title,
+        description,
+        category,
+        startTime,
+        endTime,
+        rewardType,
+        totalRewardAmount,
+        coinTypeId,
+        rewardPerCompletion,
+        maxCompleters,
+        settings,
+        status,
+        onChainId,
+      } = req.body;
+
+      // Build update object
+      const updateData: Partial<typeof questionnaires.$inferInsert> = {
+        updatedAt: new Date(),
+      };
+
+      if (title !== undefined) updateData.title = title;
+      if (description !== undefined) updateData.description = description;
+      if (category !== undefined) updateData.category = category;
+      if (startTime !== undefined) updateData.startTime = new Date(startTime);
+      if (endTime !== undefined) updateData.endTime = new Date(endTime);
+      if (rewardType !== undefined) updateData.rewardType = rewardType;
+      if (totalRewardAmount !== undefined) updateData.totalRewardAmount = totalRewardAmount.toString();
+      if (coinTypeId !== undefined) updateData.coinTypeId = coinTypeId;
+      if (rewardPerCompletion !== undefined) updateData.rewardPerCompletion = rewardPerCompletion.toString();
+      if (maxCompleters !== undefined) updateData.maxCompleters = maxCompleters;
+      if (settings !== undefined) updateData.settings = settings;
+      if (status !== undefined) updateData.status = status;
+      if (onChainId !== undefined) updateData.onChainId = onChainId;
+
+      const [updated] = await db
+        .update(questionnaires)
+        .set(updateData)
+        .where(eq(questionnaires.id, id))
+        .returning();
+
+      if (!updated) {
+        return res.status(404).json({ success: false, error: "Questionnaire not found" });
+      }
+
+      res.json({ success: true, data: updated });
+    } catch (error) {
+      console.error("Error updating questionnaire:", error);
+      res.status(500).json({ success: false, error: "Failed to update questionnaire" });
+    }
+  });
+
+  /**
+   * DELETE /api/questionnaires/:id
+   * Archive a questionnaire (soft delete)
+   */
+  app.delete("/api/questionnaires/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const [archived] = await db
+        .update(questionnaires)
+        .set({
+          status: QUESTIONNAIRE_STATUS.ARCHIVED,
+          updatedAt: new Date(),
+        })
+        .where(eq(questionnaires.id, id))
+        .returning();
+
+      if (!archived) {
+        return res.status(404).json({ success: false, error: "Questionnaire not found" });
+      }
+
+      res.json({ success: true, data: archived });
+    } catch (error) {
+      console.error("Error archiving questionnaire:", error);
+      res.status(500).json({ success: false, error: "Failed to archive questionnaire" });
+    }
+  });
+
+  /**
+   * POST /api/questionnaires/:id/polls
+   * Add a poll to a questionnaire
+   */
+  app.post("/api/questionnaires/:id/polls", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { pollId, source, rewardPercentage } = req.body;
+
+      if (pollId === undefined) {
+        return res.status(400).json({ success: false, error: "pollId is required" });
+      }
+
+      // Get current max sort order
+      const [maxSort] = await db
+        .select({ maxOrder: sql<number>`COALESCE(MAX(${questionnairePolls.sortOrder}), -1)` })
+        .from(questionnairePolls)
+        .where(eq(questionnairePolls.questionnaireId, id));
+
+      const nextOrder = (maxSort?.maxOrder ?? -1) + 1;
+
+      // Add poll
+      const [newPoll] = await db
+        .insert(questionnairePolls)
+        .values({
+          questionnaireId: id,
+          pollId,
+          sortOrder: nextOrder,
+          source: source || "existing",
+          rewardPercentage,
+        })
+        .returning();
+
+      // Update poll count
+      await db
+        .update(questionnaires)
+        .set({
+          pollCount: sql`${questionnaires.pollCount} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(eq(questionnaires.id, id));
+
+      res.json({ success: true, data: newPoll });
+    } catch (error) {
+      console.error("Error adding poll to questionnaire:", error);
+      res.status(500).json({ success: false, error: "Failed to add poll" });
+    }
+  });
+
+  /**
+   * DELETE /api/questionnaires/:id/polls/:pollId
+   * Remove a poll from a questionnaire
+   */
+  app.delete("/api/questionnaires/:id/polls/:pollId", async (req, res) => {
+    try {
+      const { id, pollId } = req.params;
+
+      const [deleted] = await db
+        .delete(questionnairePolls)
+        .where(
+          and(
+            eq(questionnairePolls.questionnaireId, id),
+            eq(questionnairePolls.pollId, parseInt(pollId))
+          )
+        )
+        .returning();
+
+      if (!deleted) {
+        return res.status(404).json({ success: false, error: "Poll not found in questionnaire" });
+      }
+
+      // Update poll count
+      await db
+        .update(questionnaires)
+        .set({
+          pollCount: sql`GREATEST(${questionnaires.pollCount} - 1, 0)`,
+          updatedAt: new Date(),
+        })
+        .where(eq(questionnaires.id, id));
+
+      res.json({ success: true, data: deleted });
+    } catch (error) {
+      console.error("Error removing poll from questionnaire:", error);
+      res.status(500).json({ success: false, error: "Failed to remove poll" });
+    }
+  });
+
+  /**
+   * PUT /api/questionnaires/:id/polls/order
+   * Reorder polls in a questionnaire
+   */
+  app.put("/api/questionnaires/:id/polls/order", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { pollOrder } = req.body; // Array of { pollId, sortOrder }
+
+      if (!Array.isArray(pollOrder)) {
+        return res.status(400).json({ success: false, error: "pollOrder must be an array" });
+      }
+
+      // Update each poll's sort order
+      for (const { pollId, sortOrder } of pollOrder) {
+        await db
+          .update(questionnairePolls)
+          .set({ sortOrder })
+          .where(
+            and(
+              eq(questionnairePolls.questionnaireId, id),
+              eq(questionnairePolls.pollId, pollId)
+            )
+          );
+      }
+
+      // Fetch updated polls
+      const polls = await db
+        .select()
+        .from(questionnairePolls)
+        .where(eq(questionnairePolls.questionnaireId, id))
+        .orderBy(questionnairePolls.sortOrder);
+
+      res.json({ success: true, data: polls });
+    } catch (error) {
+      console.error("Error reordering polls:", error);
+      res.status(500).json({ success: false, error: "Failed to reorder polls" });
+    }
+  });
+
+  /**
+   * GET /api/questionnaires/:id/progress/:address
+   * Get user's progress on a questionnaire
+   */
+  app.get("/api/questionnaires/:id/progress/:address", async (req, res) => {
+    try {
+      const { id, address } = req.params;
+      const normalizedAddress = address.toLowerCase();
+
+      const [progress] = await db
+        .select()
+        .from(questionnaireProgress)
+        .where(
+          and(
+            eq(questionnaireProgress.questionnaireId, id),
+            eq(questionnaireProgress.walletAddress, normalizedAddress)
+          )
+        )
+        .limit(1);
+
+      if (!progress) {
+        // Return empty progress
+        return res.json({
+          success: true,
+          data: {
+            questionnaireId: id,
+            walletAddress: normalizedAddress,
+            started: false,
+            pollsAnswered: [],
+            isComplete: false,
+            claimed: false,
+          },
+        });
+      }
+
+      res.json({ success: true, data: progress });
+    } catch (error) {
+      console.error("Error fetching questionnaire progress:", error);
+      res.status(500).json({ success: false, error: "Failed to fetch progress" });
+    }
+  });
+
+  /**
+   * POST /api/questionnaires/:id/start/:address
+   * Start a questionnaire for a user
+   */
+  app.post("/api/questionnaires/:id/start/:address", async (req, res) => {
+    try {
+      const { id, address } = req.params;
+      const normalizedAddress = address.toLowerCase();
+
+      // Check if already started
+      const [existing] = await db
+        .select()
+        .from(questionnaireProgress)
+        .where(
+          and(
+            eq(questionnaireProgress.questionnaireId, id),
+            eq(questionnaireProgress.walletAddress, normalizedAddress)
+          )
+        )
+        .limit(1);
+
+      if (existing) {
+        return res.json({ success: true, data: existing });
+      }
+
+      // Create progress record
+      const [progress] = await db
+        .insert(questionnaireProgress)
+        .values({
+          questionnaireId: id,
+          walletAddress: normalizedAddress,
+          started: true,
+          startedAt: new Date(),
+          pollsAnswered: [],
+          isComplete: false,
+          claimed: false,
+        })
+        .returning();
+
+      res.json({ success: true, data: progress });
+    } catch (error) {
+      console.error("Error starting questionnaire:", error);
+      res.status(500).json({ success: false, error: "Failed to start questionnaire" });
+    }
+  });
+
+  /**
+   * PUT /api/questionnaires/:id/progress/:address
+   * Update user's progress on a questionnaire
+   */
+  app.put("/api/questionnaires/:id/progress/:address", async (req, res) => {
+    try {
+      const { id, address } = req.params;
+      const { pollsAnswered, isComplete, bulkVoteTxHash, claimed, claimTxHash } = req.body;
+      const normalizedAddress = address.toLowerCase();
+
+      // Build update object
+      const updateData: Partial<typeof questionnaireProgress.$inferInsert> = {
+        updatedAt: new Date(),
+      };
+
+      if (pollsAnswered !== undefined) updateData.pollsAnswered = pollsAnswered;
+      if (isComplete !== undefined) {
+        updateData.isComplete = isComplete;
+        if (isComplete) {
+          updateData.completedAt = new Date();
+        }
+      }
+      if (bulkVoteTxHash !== undefined) updateData.bulkVoteTxHash = bulkVoteTxHash;
+      if (claimed !== undefined) {
+        updateData.claimed = claimed;
+        if (claimed) {
+          updateData.claimedAt = new Date();
+        }
+      }
+      if (claimTxHash !== undefined) updateData.claimTxHash = claimTxHash;
+
+      // Check if progress exists
+      const [existing] = await db
+        .select()
+        .from(questionnaireProgress)
+        .where(
+          and(
+            eq(questionnaireProgress.questionnaireId, id),
+            eq(questionnaireProgress.walletAddress, normalizedAddress)
+          )
+        )
+        .limit(1);
+
+      let result;
+      if (existing) {
+        [result] = await db
+          .update(questionnaireProgress)
+          .set(updateData)
+          .where(eq(questionnaireProgress.id, existing.id))
+          .returning();
+      } else {
+        // Create new progress record
+        [result] = await db
+          .insert(questionnaireProgress)
+          .values({
+            questionnaireId: id,
+            walletAddress: normalizedAddress,
+            started: true,
+            startedAt: new Date(),
+            ...updateData,
+          })
+          .returning();
+      }
+
+      // If marked as complete, update questionnaire completion count
+      if (isComplete && !existing?.isComplete) {
+        await db
+          .update(questionnaires)
+          .set({
+            completionCount: sql`${questionnaires.completionCount} + 1`,
+            updatedAt: new Date(),
+          })
+          .where(eq(questionnaires.id, id));
+      }
+
+      res.json({ success: true, data: result });
+    } catch (error) {
+      console.error("Error updating questionnaire progress:", error);
+      res.status(500).json({ success: false, error: "Failed to update progress" });
+    }
+  });
+
+  /**
+   * POST /api/questionnaires/:id/bulk-vote
+   * Record a bulk vote for a questionnaire (called after successful on-chain bulk_vote)
+   */
+  app.post("/api/questionnaires/:id/bulk-vote", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { walletAddress, pollIds, optionIndices, txHash } = req.body;
+
+      if (!walletAddress || !pollIds || !optionIndices || !txHash) {
+        return res.status(400).json({ success: false, error: "Missing required fields" });
+      }
+
+      const normalizedAddress = walletAddress.toLowerCase();
+
+      // Build pollsAnswered array
+      const pollsAnswered = pollIds.map((pollId: number, index: number) => ({
+        pollId,
+        optionIndex: optionIndices[index],
+        answeredAt: new Date().toISOString(),
+      }));
+
+      // Get or create progress record
+      const [existing] = await db
+        .select()
+        .from(questionnaireProgress)
+        .where(
+          and(
+            eq(questionnaireProgress.questionnaireId, id),
+            eq(questionnaireProgress.walletAddress, normalizedAddress)
+          )
+        )
+        .limit(1);
+
+      let result;
+      if (existing) {
+        [result] = await db
+          .update(questionnaireProgress)
+          .set({
+            pollsAnswered,
+            isComplete: true,
+            completedAt: new Date(),
+            bulkVoteTxHash: txHash,
+            updatedAt: new Date(),
+          })
+          .where(eq(questionnaireProgress.id, existing.id))
+          .returning();
+      } else {
+        [result] = await db
+          .insert(questionnaireProgress)
+          .values({
+            questionnaireId: id,
+            walletAddress: normalizedAddress,
+            started: true,
+            startedAt: new Date(),
+            pollsAnswered,
+            isComplete: true,
+            completedAt: new Date(),
+            bulkVoteTxHash: txHash,
+            claimed: false,
+          })
+          .returning();
+      }
+
+      // Update questionnaire completion count if newly completed
+      if (!existing?.isComplete) {
+        await db
+          .update(questionnaires)
+          .set({
+            completionCount: sql`${questionnaires.completionCount} + 1`,
+            updatedAt: new Date(),
+          })
+          .where(eq(questionnaires.id, id));
+      }
+
+      // Record votes for each poll in dailyVoteLogs
+      const today = getTodayString();
+      const profile = await getOrCreateProfile(normalizedAddress);
+
+      // Update user's vote count
+      const votesToday = profile.lastVoteResetDate === today
+        ? profile.votesToday + pollIds.length
+        : pollIds.length;
+
+      await db
+        .update(userProfiles)
+        .set({
+          votesToday,
+          lastVoteDate: today,
+          lastVoteResetDate: today,
+          seasonVotes: profile.seasonVotes + pollIds.length,
+          updatedAt: new Date(),
+        })
+        .where(eq(userProfiles.id, profile.id));
+
+      res.json({ success: true, data: result });
+    } catch (error) {
+      console.error("Error recording bulk vote:", error);
+      res.status(500).json({ success: false, error: "Failed to record bulk vote" });
+    }
+  });
+
+  /**
+   * GET /api/questionnaires/active
+   * Get active questionnaires (for browse page)
+   */
+  app.get("/api/questionnaires/active", async (req, res) => {
+    try {
+      const now = new Date();
+      const limit = parseInt(req.query.limit as string) || 20;
+      const offset = parseInt(req.query.offset as string) || 0;
+
+      const activeQuestionnaires = await db
+        .select()
+        .from(questionnaires)
+        .where(
+          and(
+            eq(questionnaires.status, QUESTIONNAIRE_STATUS.ACTIVE),
+            gte(questionnaires.endTime, now)
+          )
+        )
+        .orderBy(desc(questionnaires.createdAt))
+        .limit(limit)
+        .offset(offset);
+
+      res.json({ success: true, data: activeQuestionnaires });
+    } catch (error) {
+      console.error("Error fetching active questionnaires:", error);
+      res.status(500).json({ success: false, error: "Failed to fetch questionnaires" });
+    }
+  });
+
+  /**
+   * GET /api/questionnaires/creator/:address
+   * Get questionnaires created by a specific address
+   */
+  app.get("/api/questionnaires/creator/:address", async (req, res) => {
+    try {
+      const { address } = req.params;
+      const normalizedAddress = address.toLowerCase();
+
+      const creatorQuestionnaires = await db
+        .select()
+        .from(questionnaires)
+        .where(eq(questionnaires.creatorAddress, normalizedAddress))
+        .orderBy(desc(questionnaires.createdAt));
+
+      res.json({ success: true, data: creatorQuestionnaires });
+    } catch (error) {
+      console.error("Error fetching creator questionnaires:", error);
+      res.status(500).json({ success: false, error: "Failed to fetch questionnaires" });
+    }
+  });
 
   return httpServer;
 }
